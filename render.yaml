@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: threadline-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: WHAPI_TOKEN
+        sync: false
+      - key: WEBHOOK_SECRET
+        sync: false
