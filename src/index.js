@@ -4,6 +4,8 @@ import dotenv from "dotenv";
 
 import webhookRouter from "./routes/webhook.js";
 import ticketsRouter from "./routes/tickets.js";
+import authRouter from "./routes/auth.js";
+import { requireAuth } from "./middleware/auth.js";
 
 dotenv.config();
 
@@ -12,7 +14,8 @@ app.use(cors());
 app.use(express.json());
 
 app.use("/webhook", webhookRouter);
-app.use("/api/tickets", ticketsRouter);
+app.use("/api/auth", authRouter);
+app.use("/api/tickets", requireAuth, ticketsRouter);
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 

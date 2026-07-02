@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Search, Lock, Unlock, CheckCircle2, Clock, AlertTriangle, Send,
-  Phone, Calendar, ChevronDown, X, Circle, MessageCircle, Tag as TagIcon,
+  Phone, Calendar, ChevronDown, X, Circle, MessageCircle, Tag as TagIcon, LogOut,
 } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 const POLL_MS = 4000;
+const TOKEN_KEY = "threadline_token";
 
 const C = {
   ink: "#14213D",
@@ -69,17 +70,29 @@ function initials(name) {
   return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 }
 
-async function api(path, options) {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { "content-type": "application/json" },
-    ...options,
-  });
+async function api(path, options = {}) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const headers = { "content-type": "application/json", ...(options.headers || {}) };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${API_URL}${path}`, { ...options, headers });
   const data = await res.json().catch(() => ({}));
+
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    const err = new Error(data.error || "Session expired, please sign in again");
+    err.unauthorized = true;
+    throw err;
+  }
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
 }
 
 export default function ThreadlineCRM() {
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(true);
@@ -99,12 +112,43 @@ export default function ThreadlineCRM() {
     setTimeout(() => setToast(null), 3200);
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setTickets([]);
+    setSelectedId(null);
+    setSelectedDetail(null);
+  };
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoggingIn(true);
+    setLoginError("");
+    try {
+      const res = await fetch(`${API_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: loginPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Login failed");
+      localStorage.setItem(TOKEN_KEY, data.token);
+      setToken(data.token);
+      setLoginPassword("");
+    } catch (err) {
+      setLoginError(err.message);
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
   const fetchTickets = async () => {
     try {
       const data = await api("/api/tickets");
       setTickets(data);
       setConnected(true);
     } catch (err) {
+      if (err.unauthorized) return handleLogout();
       setConnected(false);
       if (loading) showToast(`Can't reach Threadline API at ${API_URL}`);
     } finally {
@@ -117,26 +161,28 @@ export default function ThreadlineCRM() {
       const data = await api(`/api/tickets/${id}`);
       setSelectedDetail(data);
     } catch (err) {
+      if (err.unauthorized) return handleLogout();
       setConnected(false);
     }
   };
 
   useEffect(() => {
+    if (!token) return;
     fetchTickets();
     const id = setInterval(fetchTickets, POLL_MS);
     return () => clearInterval(id);
-  }, []);
+  }, [token]);
 
   useEffect(() => {
     if (!selectedId && tickets.length > 0) setSelectedId(tickets[0].id);
   }, [tickets, selectedId]);
 
   useEffect(() => {
-    if (!selectedId) return;
+    if (!token || !selectedId) return;
     fetchDetail(selectedId);
     const id = setInterval(() => fetchDetail(selectedId), POLL_MS);
     return () => clearInterval(id);
-  }, [selectedId]);
+  }, [token, selectedId]);
 
   useEffect(() => {
     setNotesDraft(selectedDetail?.notes || "");
@@ -155,6 +201,7 @@ export default function ThreadlineCRM() {
       setTickets((prev) => prev.map((t) => (t.id === id ? { ...t, ...updated } : t)));
       setSelectedDetail((prev) => (prev && prev.id === id ? { ...prev, ...updated } : prev));
     } catch (err) {
+      if (err.unauthorized) return handleLogout();
       showToast(err.message);
     }
   };
@@ -178,6 +225,7 @@ export default function ThreadlineCRM() {
       await fetchDetail(selectedDetail.id);
       await fetchTickets();
     } catch (err) {
+      if (err.unauthorized) return handleLogout();
       showToast(err.message);
     } finally {
       setSending(false);
@@ -219,6 +267,58 @@ export default function ThreadlineCRM() {
   ];
 
   const selected = selectedDetail;
+
+  if (!token) {
+    return (
+      <div
+        style={{ fontFamily: "'Inter', sans-serif", background: C.paper, color: C.ink }}
+        className="w-full h-full min-h-screen flex items-center justify-center px-4"
+      >
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+          .display { font-family: 'Space Grotesk', sans-serif; }
+        `}</style>
+        <form
+          onSubmit={handleLogin}
+          style={{ background: C.card, border: `1px solid ${C.line}` }}
+          className="w-full max-w-sm rounded-xl p-6 space-y-4 shadow-sm"
+        >
+          <div className="flex items-center gap-2 mb-2">
+            <div style={{ background: C.green }} className="w-8 h-8 rounded-md flex items-center justify-center">
+              <MessageCircle size={17} color="#fff" strokeWidth={2.2} />
+            </div>
+            <span className="display text-lg font-semibold tracking-tight">Threadline</span>
+          </div>
+          <div>
+            <label className="text-xs font-medium" style={{ color: C.slate }}>
+              Dashboard password
+            </label>
+            <input
+              type="password"
+              autoFocus
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              style={{ background: C.paperDim, color: C.ink }}
+              className="w-full mt-1 text-sm rounded-lg px-3 py-2.5 outline-none"
+            />
+          </div>
+          {loginError && (
+            <div className="text-xs" style={{ color: C.coral }}>
+              {loginError}
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={loggingIn || !loginPassword}
+            style={{ background: C.green, opacity: loggingIn || !loginPassword ? 0.6 : 1 }}
+            className="w-full text-sm font-medium text-white py-2.5 rounded-lg"
+          >
+            {loggingIn ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -264,6 +364,14 @@ export default function ThreadlineCRM() {
               </div>
             </div>
           ))}
+          <button
+            onClick={handleLogout}
+            title="Sign out"
+            style={{ color: C.slateLight }}
+            className="p-1.5 rounded-md hover:bg-white/10 transition-colors"
+          >
+            <LogOut size={16} />
+          </button>
         </div>
       </div>
 

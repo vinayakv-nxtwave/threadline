@@ -80,6 +80,12 @@ Once deployed for real, swap the ngrok URL for your production domain.
 | GET    | `/api/tickets/:id`        | Ticket detail + full message thread       |
 | PATCH  | `/api/tickets/:id`        | Update `status`, `category`, `priority`, `assignee`, `notes`, `tags` |
 | POST   | `/api/tickets/:id/reply`  | `{ "body": "..." }` — sends a WhatsApp reply via Whapi and logs it |
+| POST   | `/api/auth/login`         | `{ "password": "..." }` — returns `{ "token": "..." }` on success |
+
+All `/api/tickets` routes require `Authorization: Bearer <token>`, obtained by
+logging in with `DASHBOARD_PASSWORD`. Tokens are stateless (HMAC-signed, no
+session store), so they keep working across Render free-tier restarts, and
+expire after 30 days.
 
 The server rejects `PATCH .../:id { "status": "closed" }` with a 400 unless
 the ticket's current status is already `resolved` — same rule the dashboard
@@ -114,8 +120,8 @@ curl http://localhost:3000/api/tickets
 - **Only text messages** are turned into tickets right now. Whapi also sends
   images, voice notes, documents, etc. — those webhook events are currently
   skipped. Worth adding once you know which types students actually send.
-- **No auth** on the `/api/tickets` routes yet — add before this is reachable
-  from anywhere but your own dashboard.
+- `/api/tickets` routes require a shared dashboard password (see below) — this
+  is team-level access control, not per-user accounts.
 - **No agent/user accounts** — `assignee` is just a free-text name for now.
 - Delivery/read status webhooks (`statuses.post`) aren't handled — useful
   later if you want to show "seen" ticks in the dashboard.
@@ -138,8 +144,14 @@ manual refresh.
 
 ## 9. Deploying
 
-`render.yaml` in the repo root configures a Render web service (`npm install`
-/ `npm start`). On Render: New → Blueprint → point at this repo, then set
-`DATABASE_URL`, `WHAPI_TOKEN`, and `WEBHOOK_SECRET` in the dashboard (they're
-marked `sync: false` so Render prompts for them instead of expecting them in
-the repo). Once deployed, update the Whapi webhook URL to the Render domain.
+`render.yaml` in the repo root configures two Render services: the backend
+(`npm install` / `npm start`) and the dashboard as a static site (built from
+`client/`). On Render: New → Blueprint → point at this repo, then set
+`DATABASE_URL`, `WHAPI_TOKEN`, `WEBHOOK_SECRET`, and `DASHBOARD_PASSWORD` in
+the dashboard (they're marked `sync: false` so Render prompts for them
+instead of expecting them in the repo). Once deployed, update the Whapi
+webhook URL to the backend's Render domain.
+
+If the backend's Render URL changes, update `VITE_API_URL` in the
+`threadline-dashboard` static site's env vars and trigger a redeploy (Vite
+bakes env vars in at build time, so this can't be changed at runtime).
