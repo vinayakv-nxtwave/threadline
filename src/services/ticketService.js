@@ -31,7 +31,7 @@ export function classifyMessage(text) {
 
   let priority = "medium";
   const exclaims = (lower.match(/!/g) || []).length;
-  if (/\b(urgent|asap|emergency|immediately|right now)\b/.test(lower) || exclaims >= 2) {
+  if (/\burgent(ly)?\b|\b(asap|emergency|immediately|right now)\b/.test(lower) || exclaims >= 2) {
     priority = "urgent";
   } else if (/\b(important|quick|quickly|soon)\b/.test(lower)) {
     priority = "high";
