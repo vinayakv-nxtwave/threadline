@@ -625,10 +625,20 @@ export default function ThreadlineCRM() {
               <div className="text-[10px] uppercase tracking-wide font-medium mb-1.5" style={{ color: C.slateLight }}>
                 Priority
               </div>
-              <div className="flex items-center gap-1.5 text-sm">
-                <span style={{ color: PRIORITY[selected.priority]?.color }} className="font-medium">
-                  {PRIORITY[selected.priority]?.label || selected.priority}
-                </span>
+              <div className="flex flex-wrap gap-1.5">
+                {Object.entries(PRIORITY).map(([key, meta]) => (
+                  <button
+                    key={key}
+                    onClick={() => updateTicket(selected.id, { priority: key })}
+                    style={{
+                      background: selected.priority === key ? meta.color : C.paperDim,
+                      color: selected.priority === key ? "#fff" : C.slate,
+                    }}
+                    className="text-xs px-2.5 py-1 rounded-full font-medium"
+                  >
+                    {meta.label}
+                  </button>
+                ))}
               </div>
             </div>
 

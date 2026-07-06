@@ -12,12 +12,43 @@ export async function findLatestTicketByPhone(phone) {
   return rows[0] || null;
 }
 
-export async function createTicket({ phone, name }) {
+const CATEGORY_KEYWORDS = [
+  { category: "certificate", pattern: /\b(certificate|placement)\b/ },
+  { category: "payment", pattern: /\b(emi|payment|refund|fee|fees|invoice)\b/ },
+  { category: "session", pattern: /\b(live class|live session|mentor|webinar)\b/ },
+  { category: "access", pattern: /\b(password|log ?in|account access|otp|locked out)\b/ },
+  { category: "doubt", pattern: /\b(doubt|explain|understand|concept|assignment)\b/ },
+  { category: "technical", pattern: /\b(not working|error|bug|crash|video|buffering|link)\b/ },
+];
+
+/**
+ * Scans the student's first message for keywords to pick a sensible starting
+ * category/priority, so new tickets aren't all dumped into "general/medium".
+ * Agents can always override afterward.
+ */
+export function classifyMessage(text) {
+  const lower = String(text || "").toLowerCase();
+
+  let priority = "medium";
+  const exclaims = (lower.match(/!/g) || []).length;
+  if (/\b(urgent|asap|emergency|immediately|right now)\b/.test(lower) || exclaims >= 2) {
+    priority = "urgent";
+  } else if (/\b(important|quick|quickly|soon)\b/.test(lower)) {
+    priority = "high";
+  }
+
+  const category = CATEGORY_KEYWORDS.find((rule) => rule.pattern.test(lower))?.category || "general";
+
+  return { category, priority };
+}
+
+export async function createTicket({ phone, name, text }) {
+  const { category, priority } = classifyMessage(text);
   const { rows } = await pool.query(
     `INSERT INTO tickets (student_phone, student_name, status, category, priority)
-     VALUES ($1, $2, 'new', 'general', 'medium')
+     VALUES ($1, $2, 'new', $3, $4)
      RETURNING *`,
-    [phone, name || null]
+    [phone, name || null, category, priority]
   );
   const ticket = rows[0];
 
@@ -68,7 +99,7 @@ export async function handleIncomingMessage({ phone, name, text, whapiMessageId 
   let reopened = false;
 
   if (!ticket) {
-    ticket = await createTicket({ phone: normalizedPhone, name });
+    ticket = await createTicket({ phone: normalizedPhone, name, text });
   } else {
     reopened = await reopenIfNeeded(ticket);
     if (!ticket.student_name && name) {
