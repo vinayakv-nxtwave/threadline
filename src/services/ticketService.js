@@ -73,13 +73,20 @@ export async function addMessage(ticketId, direction, body, whapiMessageId = nul
 /**
  * The core rule: a ticket cannot sit closed or resolved once the student has
  * something new to say. If the student messages in on a resolved/closed
- * ticket, it snaps back open. If they message on a "pending" ticket
- * (waiting on them), it moves to "open" (waiting on us again).
+ * ticket, it snaps back open — treated as a new query, so category/priority
+ * are re-classified from this message same as a brand new ticket. If they
+ * message on a "pending" ticket (waiting on them), it's a continuation of
+ * the same query, so it just moves to "open" (waiting on us again) without
+ * touching classification.
  * Returns true if the ticket was reopened from resolved/closed.
  */
-export async function reopenIfNeeded(ticket) {
+export async function reopenIfNeeded(ticket, text) {
   if (ticket.status === "resolved" || ticket.status === "closed") {
-    await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [ticket.id]);
+    const { category, priority } = classifyMessage(text);
+    await pool.query(
+      `UPDATE tickets SET status = 'open', category = $2, priority = $3 WHERE id = $1`,
+      [ticket.id, category, priority]
+    );
     return true;
   }
   if (ticket.status === "pending") {
@@ -101,7 +108,7 @@ export async function handleIncomingMessage({ phone, name, text, whapiMessageId 
   if (!ticket) {
     ticket = await createTicket({ phone: normalizedPhone, name, text });
   } else {
-    reopened = await reopenIfNeeded(ticket);
+    reopened = await reopenIfNeeded(ticket, text);
     if (!ticket.student_name && name) {
       await pool.query(`UPDATE tickets SET student_name = $1 WHERE id = $2`, [name, ticket.id]);
     }
