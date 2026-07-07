@@ -61,11 +61,23 @@ export async function createTicket({ phone, name, text }) {
   return updated[0];
 }
 
-export async function addMessage(ticketId, direction, body, whapiMessageId = null) {
+export async function addMessage(
+  ticketId,
+  direction,
+  {
+    messageType = "text",
+    body = null,
+    mediaUrl = null,
+    mimeType = null,
+    filename = null,
+    caption = null,
+    whapiMessageId = null,
+  }
+) {
   await pool.query(
-    `INSERT INTO messages (ticket_id, direction, body, whapi_message_id)
-     VALUES ($1, $2, $3, $4)`,
-    [ticketId, direction, body, whapiMessageId]
+    `INSERT INTO messages (ticket_id, direction, message_type, body, media_url, mime_type, filename, caption, whapi_message_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [ticketId, direction, messageType, body, mediaUrl, mimeType, filename, caption, whapiMessageId]
   );
   await pool.query(`UPDATE tickets SET last_message_at = now() WHERE id = $1`, [ticketId]);
 }
@@ -100,21 +112,40 @@ export async function reopenIfNeeded(ticket, text) {
  * Finds or creates the ticket for this phone number, reopens it if needed,
  * and logs the message.
  */
-export async function handleIncomingMessage({ phone, name, text, whapiMessageId }) {
+export async function handleIncomingMessage({
+  phone,
+  name,
+  type = "text",
+  text,
+  mediaUrl,
+  mimeType,
+  filename,
+  caption,
+  whapiMessageId,
+}) {
   const normalizedPhone = normalizePhone(phone);
   let ticket = await findLatestTicketByPhone(normalizedPhone);
   let reopened = false;
+  const classifyText = text ?? caption ?? "";
 
   if (!ticket) {
-    ticket = await createTicket({ phone: normalizedPhone, name, text });
+    ticket = await createTicket({ phone: normalizedPhone, name, text: classifyText });
   } else {
-    reopened = await reopenIfNeeded(ticket, text);
+    reopened = await reopenIfNeeded(ticket, classifyText);
     if (!ticket.student_name && name) {
       await pool.query(`UPDATE tickets SET student_name = $1 WHERE id = $2`, [name, ticket.id]);
     }
   }
 
-  await addMessage(ticket.id, "inbound", text, whapiMessageId);
+  await addMessage(ticket.id, "inbound", {
+    messageType: type,
+    body: text ?? caption ?? null,
+    mediaUrl,
+    mimeType,
+    filename,
+    caption,
+    whapiMessageId,
+  });
 
   return { ticket, reopened };
 }

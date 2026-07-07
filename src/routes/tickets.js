@@ -1,9 +1,11 @@
 import { Router } from "express";
+import multer from "multer";
 import { pool } from "../db.js";
 import { addMessage } from "../services/ticketService.js";
-import { sendText } from "../services/whapiClient.js";
+import { sendText, sendMedia } from "../services/whapiClient.js";
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024 } });
 
 // GET /api/tickets?status=open&category=technical&search=priya
 router.get("/", async (req, res) => {
@@ -89,31 +91,61 @@ router.patch("/:id", async (req, res) => {
   res.json(rows[0]);
 });
 
-// POST /api/tickets/:id/reply  -> agent reply, sent out over WhatsApp via Whapi
-router.post("/:id/reply", async (req, res) => {
+// POST /api/tickets/:id/reply  -> agent reply (text or media), sent out over WhatsApp via Whapi
+router.post("/:id/reply", upload.single("file"), async (req, res) => {
   const { body } = req.body;
-  if (!body || !body.trim()) return res.status(400).json({ error: "body is required" });
+  const file = req.file;
 
   const { rows } = await pool.query("SELECT * FROM tickets WHERE id = $1", [req.params.id]);
   const ticket = rows[0];
   if (!ticket) return res.status(404).json({ error: "not found" });
 
-  let whapiResponse;
   try {
-    whapiResponse = await sendText(ticket.student_phone, body);
+    if (file) {
+      const mediaType = file.mimetype.startsWith("image/")
+        ? "image"
+        : file.mimetype.startsWith("video/")
+        ? "video"
+        : file.mimetype.startsWith("audio/")
+        ? req.body.isVoiceNote === "true"
+          ? "voice"
+          : "audio"
+        : "document";
+
+      const dataUri = `data:${file.mimetype};name=${file.originalname};base64,${file.buffer.toString(
+        "base64"
+      )}`;
+      const whapiRes = await sendMedia(ticket.student_phone, mediaType, dataUri, {
+        caption: body,
+        filename: file.originalname,
+      });
+      await addMessage(ticket.id, "outbound", {
+        messageType: mediaType,
+        body: body || null,
+        mimeType: file.mimetype,
+        filename: file.originalname,
+        caption: body || null,
+        whapiMessageId: whapiRes?.message?.id || null,
+      });
+    } else {
+      if (!body || !body.trim()) return res.status(400).json({ error: "body is required" });
+      const whapiRes = await sendText(ticket.student_phone, body);
+      await addMessage(ticket.id, "outbound", {
+        messageType: "text",
+        body,
+        whapiMessageId: whapiRes?.message?.id || null,
+      });
+    }
+
+    if (ticket.status === "new") {
+      await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [ticket.id]);
+    }
+
+    res.json({ ok: true });
   } catch (err) {
-    console.error("Whapi send error:", err);
-    return res.status(502).json({ error: "failed to send message via Whapi" });
+    console.error("Reply send error:", err);
+    res.status(502).json({ error: "failed to send message via Whapi" });
   }
-
-  const whapiMessageId = whapiResponse?.message?.id || whapiResponse?.id || null;
-  await addMessage(ticket.id, "outbound", body, whapiMessageId);
-
-  if (ticket.status === "new") {
-    await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [ticket.id]);
-  }
-
-  res.json({ ok: true });
 });
 
 export default router;

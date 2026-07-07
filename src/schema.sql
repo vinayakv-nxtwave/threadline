@@ -26,10 +26,27 @@ CREATE TABLE IF NOT EXISTS messages (
   id                SERIAL PRIMARY KEY,
   ticket_id         INTEGER NOT NULL REFERENCES tickets (id) ON DELETE CASCADE,
   direction         TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
-  body              TEXT NOT NULL,
+  message_type      TEXT NOT NULL DEFAULT 'text'
+                      CHECK (message_type IN ('text', 'image', 'video', 'document', 'audio', 'voice', 'sticker')),
+  body              TEXT,
+  media_url         TEXT,
+  mime_type         TEXT,
+  filename          TEXT,
+  caption           TEXT,
   whapi_message_id  TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Migration for pre-existing tables (safe to re-run: only adds what's missing)
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS message_type TEXT NOT NULL DEFAULT 'text';
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS media_url TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS mime_type TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS filename TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS caption TEXT;
+ALTER TABLE messages ALTER COLUMN body DROP NOT NULL;
+ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_message_type_check;
+ALTER TABLE messages ADD CONSTRAINT messages_message_type_check
+  CHECK (message_type IN ('text', 'image', 'video', 'document', 'audio', 'voice', 'sticker'));
 
 CREATE INDEX IF NOT EXISTS idx_messages_ticket ON messages (ticket_id);
 

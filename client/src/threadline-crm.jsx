@@ -2,7 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import {
   Search, Lock, Unlock, CheckCircle2, Clock, AlertTriangle, Send,
   Phone, Calendar, ChevronDown, X, Circle, MessageCircle, Tag as TagIcon, LogOut,
+  Smile, Paperclip, Mic,
 } from "lucide-react";
+import EmojiPicker from "emoji-picker-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 const POLL_MS = 4000;
@@ -88,6 +90,35 @@ async function api(path, options = {}) {
   return data;
 }
 
+// Multipart upload for media replies — can't reuse api() since it always sets
+// content-type: application/json, which breaks FormData's auto boundary header.
+async function sendFileReply(ticketId, file, caption, isVoiceNote) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const form = new FormData();
+  form.append("file", file);
+  if (caption) form.append("body", caption);
+  if (isVoiceNote) form.append("isVoiceNote", "true");
+
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(`${API_URL}/api/tickets/${ticketId}/reply`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+  const data = await res.json().catch(() => ({}));
+
+  if (res.status === 401) {
+    localStorage.removeItem(TOKEN_KEY);
+    const err = new Error(data.error || "Session expired, please sign in again");
+    err.unauthorized = true;
+    throw err;
+  }
+  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  return data;
+}
+
 export default function ThreadlineCRM() {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [loginPassword, setLoginPassword] = useState("");
@@ -105,7 +136,12 @@ export default function ThreadlineCRM() {
   const [sending, setSending] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
   const [toast, setToast] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [recording, setRecording] = useState(false);
   const threadEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -230,6 +266,64 @@ export default function ThreadlineCRM() {
     } finally {
       setSending(false);
     }
+  };
+
+  const handleFileSelected = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // reset so picking the same file again still fires onChange
+    if (!file || !selectedDetail || sending) return;
+
+    setSending(true);
+    try {
+      await sendFileReply(selectedDetail.id, file, draft.trim() || undefined, false);
+      setDraft("");
+      await fetchDetail(selectedDetail.id);
+      await fetchTickets();
+    } catch (err) {
+      if (err.unauthorized) return handleLogout();
+      showToast(err.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const startRecording = async () => {
+    if (!selectedDetail || sending || recording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => e.data.size > 0 && audioChunksRef.current.push(e.data);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        if (blob.size === 0 || !selectedDetail) return;
+
+        setSending(true);
+        try {
+          await sendFileReply(selectedDetail.id, new File([blob], "voice-note.webm", { type: "audio/webm" }), null, true);
+          await fetchDetail(selectedDetail.id);
+          await fetchTickets();
+        } catch (err) {
+          if (err.unauthorized) return handleLogout();
+          showToast(err.message);
+        } finally {
+          setSending(false);
+        }
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setRecording(true);
+    } catch (err) {
+      showToast("Microphone access denied or unavailable.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setRecording(false);
   };
 
   const handleMarkResolved = (ticket) => {
@@ -527,6 +621,7 @@ export default function ThreadlineCRM() {
             <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4 space-y-3">
               {(selected.messages || []).map((m) => {
                 const fromAgent = m.direction === "outbound";
+                const type = m.message_type || "text";
                 return (
                   <div key={m.id} className={`flex ${fromAgent ? "justify-end" : "justify-start"}`}>
                     <div
@@ -537,7 +632,46 @@ export default function ThreadlineCRM() {
                       }}
                       className="max-w-[70%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed shadow-sm"
                     >
-                      {m.body}
+                      {type === "text" && m.body}
+
+                      {(type === "image" || type === "sticker") &&
+                        (m.media_url ? (
+                          <img src={m.media_url} alt="" className="rounded-lg max-w-[240px]" />
+                        ) : (
+                          <div className="text-xs italic opacity-80">📷 Sent: {m.filename || type}</div>
+                        ))}
+
+                      {type === "video" &&
+                        (m.media_url ? (
+                          <video controls src={m.media_url} className="rounded-lg max-w-[240px]" />
+                        ) : (
+                          <div className="text-xs italic opacity-80">🎞️ Sent: {m.filename || "video"}</div>
+                        ))}
+
+                      {(type === "audio" || type === "voice") &&
+                        (m.media_url ? (
+                          <audio controls src={m.media_url} />
+                        ) : (
+                          <div className="text-xs italic opacity-80">🎤 Sent: {m.filename || "voice note"}</div>
+                        ))}
+
+                      {type === "document" &&
+                        (m.media_url ? (
+                          <a
+                            href={m.media_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline text-sm"
+                            style={{ color: fromAgent ? "#fff" : C.ink }}
+                          >
+                            📄 {m.filename || "Document"}
+                          </a>
+                        ) : (
+                          <div className="text-xs italic opacity-80">📄 Sent: {m.filename || "document"}</div>
+                        ))}
+
+                      {type !== "text" && m.caption && <div className="text-xs mt-1">{m.caption}</div>}
+
                       <div
                         style={{ color: fromAgent ? "rgba(255,255,255,0.75)" : C.slateLight }}
                         className="text-[10px] mt-1 mono"
@@ -551,7 +685,50 @@ export default function ThreadlineCRM() {
               <div ref={threadEndRef} />
             </div>
 
-            <div style={{ borderTop: `1px solid ${C.line}`, background: C.card }} className="p-3 flex gap-2 items-center">
+            <div
+              style={{ borderTop: `1px solid ${C.line}`, background: C.card }}
+              className="p-3 flex gap-2 items-center relative"
+            >
+              {showEmojiPicker && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowEmojiPicker(false)} />
+                  <div className="absolute bottom-full left-3 mb-2 z-50">
+                    <EmojiPicker
+                      onEmojiClick={(emojiData) => setDraft((prev) => prev + emojiData.emoji)}
+                    />
+                  </div>
+                </>
+              )}
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelected}
+                accept="image/*,application/pdf,.doc,.docx"
+                className="hidden"
+              />
+
+              <button
+                type="button"
+                onClick={() => setShowEmojiPicker((v) => !v)}
+                title="Emoji"
+                style={{ color: C.slate }}
+                className="w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center hover:bg-black/5 transition-colors"
+              >
+                <Smile size={18} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={sending || recording}
+                title="Attach file"
+                style={{ color: C.slate }}
+                className="w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center hover:bg-black/5 transition-colors"
+              >
+                <Paperclip size={18} />
+              </button>
+
               <input
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -561,6 +738,20 @@ export default function ThreadlineCRM() {
                 style={{ background: C.paperDim, color: C.ink }}
                 className="flex-1 text-sm rounded-lg px-3.5 py-2.5 outline-none placeholder:text-slate-400"
               />
+
+              <button
+                type="button"
+                onMouseDown={startRecording}
+                onMouseUp={stopRecording}
+                onMouseLeave={() => recording && stopRecording()}
+                disabled={sending}
+                title={recording ? "Recording… release to send" : "Hold to record a voice note"}
+                style={{ background: recording ? C.coral : C.paperDim, color: recording ? "#fff" : C.slate }}
+                className="w-9 h-9 flex-shrink-0 rounded-lg flex items-center justify-center transition-colors"
+              >
+                <Mic size={16} />
+              </button>
+
               <button
                 onClick={handleSend}
                 disabled={sending}
