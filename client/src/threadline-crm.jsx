@@ -72,6 +72,13 @@ function initials(name) {
   return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 }
 
+function formatDuration(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86400)}d`;
+}
+
 async function api(path, options = {}) {
   const token = localStorage.getItem(TOKEN_KEY);
   const headers = { "content-type": "application/json", ...(options.headers || {}) };
@@ -125,6 +132,7 @@ export default function ThreadlineCRM() {
   const [loginError, setLoginError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
   const [tickets, setTickets] = useState([]);
+  const [stats, setStats] = useState({ avgResolutionSeconds: null, avgResponseSeconds: null });
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
@@ -202,10 +210,23 @@ export default function ThreadlineCRM() {
     }
   };
 
+  const fetchStats = async () => {
+    try {
+      const data = await api("/api/tickets/stats/summary");
+      setStats(data);
+    } catch (err) {
+      if (err.unauthorized) return handleLogout();
+    }
+  };
+
   useEffect(() => {
     if (!token) return;
     fetchTickets();
-    const id = setInterval(fetchTickets, POLL_MS);
+    fetchStats();
+    const id = setInterval(() => {
+      fetchTickets();
+      fetchStats();
+    }, POLL_MS);
     return () => clearInterval(id);
   }, [token]);
 
@@ -358,6 +379,11 @@ export default function ThreadlineCRM() {
     { label: "Open", value: counts.open || 0, color: C.green },
     { label: "Pending", value: counts.pending || 0, color: C.amber },
     { label: "New", value: counts.new || 0, color: C.coral },
+    {
+      label: "Avg Response",
+      value: stats.avgResponseSeconds != null ? formatDuration(stats.avgResponseSeconds) : "—",
+      color: C.slateLight,
+    },
   ];
 
   const selected = selectedDetail;
@@ -787,6 +813,22 @@ export default function ThreadlineCRM() {
             <div className="flex items-center gap-2 text-xs" style={{ color: C.slate }}>
               <Phone size={13} /> <span className="mono">{selected.student_phone}</span>
             </div>
+
+            {selected.responseTime?.status === "awaiting_reply" && (
+              <div className="text-xs" style={{ color: C.coral }}>
+                Waiting {formatDuration(selected.responseTime.waitingSeconds)} for a reply
+              </div>
+            )}
+            {selected.responseTime?.status === "replied" && (
+              <div className="text-xs" style={{ color: C.slate }}>
+                Last response time: {formatDuration(selected.responseTime.responseSeconds)}
+              </div>
+            )}
+            {selected.resolutionSeconds != null && (
+              <div className="text-xs" style={{ color: C.slate }}>
+                Resolved in {formatDuration(selected.resolutionSeconds)}
+              </div>
+            )}
 
             <div>
               <div className="text-[10px] uppercase tracking-wide font-medium mb-1.5" style={{ color: C.slateLight }}>

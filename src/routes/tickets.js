@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { pool } from "../db.js";
-import { addMessage } from "../services/ticketService.js";
+import { addMessage, getResponseTime } from "../services/ticketService.js";
 import { sendText, sendMedia } from "../services/whapiClient.js";
 
 const router = Router();
@@ -42,18 +42,55 @@ router.get("/", async (req, res) => {
   res.json(rows);
 });
 
+// GET /api/tickets/stats/summary -> dashboard-wide average response/resolution times
+// Must come before GET /:id, or Express matches "stats" as an :id param.
+router.get("/stats/summary", async (req, res) => {
+  const { rows: avgResolution } = await pool.query(`
+    SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - created_at))) AS avg_seconds
+    FROM tickets WHERE resolved_at IS NOT NULL
+  `);
+
+  const { rows: avgResponse } = await pool.query(`
+    WITH pairs AS (
+      SELECT m1.ticket_id, m1.created_at AS inbound_at,
+             MIN(m2.created_at) AS reply_at
+      FROM messages m1
+      JOIN messages m2
+        ON m2.ticket_id = m1.ticket_id
+       AND m2.direction = 'outbound'
+       AND m2.created_at > m1.created_at
+      WHERE m1.direction = 'inbound'
+      GROUP BY m1.ticket_id, m1.created_at
+    )
+    SELECT AVG(EXTRACT(EPOCH FROM (reply_at - inbound_at))) AS avg_seconds
+    FROM pairs
+  `);
+
+  res.json({
+    avgResolutionSeconds: avgResolution[0].avg_seconds ? Math.round(avgResolution[0].avg_seconds) : null,
+    avgResponseSeconds: avgResponse[0].avg_seconds ? Math.round(avgResponse[0].avg_seconds) : null,
+  });
+});
+
 // GET /api/tickets/:id  -> ticket + full message thread
 router.get("/:id", async (req, res) => {
   const { rows: ticketRows } = await pool.query("SELECT * FROM tickets WHERE id = $1", [
     req.params.id,
   ]);
   if (!ticketRows[0]) return res.status(404).json({ error: "not found" });
+  const ticket = ticketRows[0];
 
   const { rows: messages } = await pool.query(
     "SELECT * FROM messages WHERE ticket_id = $1 ORDER BY created_at ASC",
     [req.params.id]
   );
-  res.json({ ...ticketRows[0], messages });
+
+  const responseTime = await getResponseTime(ticket.id);
+  const resolutionSeconds = ticket.resolved_at
+    ? Math.floor((new Date(ticket.resolved_at) - new Date(ticket.created_at)) / 1000)
+    : null;
+
+  res.json({ ...ticket, messages, responseTime, resolutionSeconds });
 });
 
 // PATCH /api/tickets/:id  -> update status / category / priority / assignee / notes / tags
@@ -64,12 +101,22 @@ router.patch("/:id", async (req, res) => {
     req.params.id,
   ]);
   if (!current[0]) return res.status(404).json({ error: "not found" });
+  const currentTicket = current[0];
 
   // Server-side enforcement of the core rule: can't close an unresolved ticket.
-  if (status === "closed" && current[0].status !== "resolved") {
+  if (status === "closed" && currentTicket.status !== "resolved") {
     return res
       .status(400)
       .json({ error: "Ticket must be marked resolved before it can be closed." });
+  }
+
+  // Track exactly when a ticket becomes resolved, and clear it if it's
+  // ever moved to a non-resolved, non-closed state again (a real reopen).
+  let resolvedAtUpdate; // undefined = don't touch the column
+  if (status === "resolved" && currentTicket.status !== "resolved") {
+    resolvedAtUpdate = new Date();
+  } else if (status && !["resolved", "closed"].includes(status) && currentTicket.resolved_at) {
+    resolvedAtUpdate = null; // clears it back to NULL
   }
 
   const fields = { status, category, priority, assignee, notes, tags };
@@ -80,6 +127,10 @@ router.patch("/:id", async (req, res) => {
       params.push(val);
       sets.push(`${key} = $${params.length}`);
     }
+  }
+  if (resolvedAtUpdate !== undefined) {
+    params.push(resolvedAtUpdate);
+    sets.push(`resolved_at = $${params.length}`);
   }
   if (!sets.length) return res.status(400).json({ error: "no fields to update" });
 
