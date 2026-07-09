@@ -115,10 +115,12 @@ router.patch("/:id", async (req, res) => {
   // Track exactly when a ticket becomes resolved, and clear it if it's
   // ever moved to a non-resolved, non-closed state again (a real reopen).
   let resolvedAtUpdate; // undefined = don't touch the column
+  let lastReopenedAtUpdate;
   if (status === "resolved" && currentTicket.status !== "resolved") {
     resolvedAtUpdate = new Date();
   } else if (status && !["resolved", "closed"].includes(status) && currentTicket.resolved_at) {
     resolvedAtUpdate = null; // clears it back to NULL
+    lastReopenedAtUpdate = new Date();
   }
 
   const fields = { status, category, priority, assignee, notes, tags };
@@ -133,6 +135,10 @@ router.patch("/:id", async (req, res) => {
   if (resolvedAtUpdate !== undefined) {
     params.push(resolvedAtUpdate);
     sets.push(`resolved_at = $${params.length}`);
+  }
+  if (lastReopenedAtUpdate !== undefined) {
+    params.push(lastReopenedAtUpdate);
+    sets.push(`last_reopened_at = $${params.length}`);
   }
   if (!sets.length) return res.status(400).json({ error: "no fields to update" });
 
