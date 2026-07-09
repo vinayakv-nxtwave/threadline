@@ -17,10 +17,12 @@ CREATE TABLE IF NOT EXISTS tickets (
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_message_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-  resolved_at      TIMESTAMPTZ
+  resolved_at      TIMESTAMPTZ,
+  last_reopened_at TIMESTAMPTZ
 );
 
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_reopened_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS idx_tickets_phone  ON tickets (student_phone);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets (status);

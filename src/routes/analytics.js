@@ -49,7 +49,7 @@ router.get("/summary", async (req, res) => {
       [days]
     ),
     pool.query(
-      `SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - created_at))) AS avg_seconds
+      `SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - COALESCE(last_reopened_at, created_at)))) AS avg_seconds
        FROM tickets
        WHERE resolved_at IS NOT NULL AND created_at > now() - ($1 || ' days')::interval`,
       [days]
@@ -71,7 +71,7 @@ router.get("/summary", async (req, res) => {
       `SELECT COALESCE(assignee, 'Unassigned') AS agent,
               COUNT(*) AS handled,
               COUNT(*) FILTER (WHERE status IN ('resolved','closed')) AS resolved_count,
-              AVG(EXTRACT(EPOCH FROM (resolved_at - created_at)))
+              AVG(EXTRACT(EPOCH FROM (resolved_at - COALESCE(last_reopened_at, created_at))))
                 FILTER (WHERE resolved_at IS NOT NULL) AS avg_resolution_seconds
        FROM tickets
        WHERE created_at > now() - ($1 || ' days')::interval

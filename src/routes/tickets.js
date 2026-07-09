@@ -46,7 +46,7 @@ router.get("/", async (req, res) => {
 // Must come before GET /:id, or Express matches "stats" as an :id param.
 router.get("/stats/summary", async (req, res) => {
   const { rows: avgResolution } = await pool.query(`
-    SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - created_at))) AS avg_seconds
+    SELECT AVG(EXTRACT(EPOCH FROM (resolved_at - COALESCE(last_reopened_at, created_at)))) AS avg_seconds
     FROM tickets WHERE resolved_at IS NOT NULL
   `);
 
@@ -87,7 +87,9 @@ router.get("/:id", async (req, res) => {
 
   const responseTime = await getResponseTime(ticket.id);
   const resolutionSeconds = ticket.resolved_at
-    ? Math.floor((new Date(ticket.resolved_at) - new Date(ticket.created_at)) / 1000)
+    ? Math.floor(
+        (new Date(ticket.resolved_at) - new Date(ticket.last_reopened_at || ticket.created_at)) / 1000
+      )
     : null;
 
   res.json({ ...ticket, messages, responseTime, resolutionSeconds });

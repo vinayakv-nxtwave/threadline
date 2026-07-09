@@ -96,7 +96,9 @@ export async function reopenIfNeeded(ticket, text) {
   if (ticket.status === "resolved" || ticket.status === "closed") {
     const { category, priority } = classifyMessage(text);
     await pool.query(
-      `UPDATE tickets SET status = 'open', category = $2, priority = $3, resolved_at = NULL WHERE id = $1`,
+      `UPDATE tickets
+       SET status = 'open', category = $2, priority = $3, resolved_at = NULL, last_reopened_at = now()
+       WHERE id = $1`,
       [ticket.id, category, priority]
     );
     return true;
