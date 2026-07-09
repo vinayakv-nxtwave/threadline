@@ -5,12 +5,13 @@ import {
   Smile, Paperclip, Mic,
 } from "lucide-react";
 import EmojiPicker from "emoji-picker-react";
+import AnalyticsView from "./threadline-analytics.jsx";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 const POLL_MS = 4000;
-const TOKEN_KEY = "threadline_token";
+export const TOKEN_KEY = "threadline_token";
 
-const C = {
+export const C = {
   ink: "#14213D",
   inkSoft: "#1E2C4F",
   paper: "#FAF9F6",
@@ -28,7 +29,7 @@ const C = {
   line: "#E4E1D8",
 };
 
-const STATUS = {
+export const STATUS = {
   new: { label: "New", color: C.coral, tint: C.coralTint },
   open: { label: "Open", color: C.green, tint: C.greenTint },
   pending: { label: "Pending", color: C.amber, tint: C.amberTint },
@@ -36,14 +37,14 @@ const STATUS = {
   closed: { label: "Closed", color: C.slate, tint: C.paperDim },
 };
 
-const PRIORITY = {
+export const PRIORITY = {
   urgent: { label: "Urgent", color: C.coral },
   high: { label: "High", color: "#C97A2E" },
   medium: { label: "Medium", color: C.amber },
   low: { label: "Low", color: C.slateLight },
 };
 
-const CATEGORY = {
+export const CATEGORY = {
   technical: { label: "Technical Issue", color: "#2C8FC9" },
   doubt: { label: "Doubt Resolution", color: "#6D5DD3" },
   session: { label: "Live Session / Mentor", color: "#4D7C0F" },
@@ -72,14 +73,14 @@ function initials(name) {
   return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 }
 
-function formatDuration(seconds) {
+export function formatDuration(seconds) {
   if (seconds < 60) return `${seconds}s`;
   if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
   return `${Math.round(seconds / 86400)}d`;
 }
 
-async function api(path, options = {}) {
+export async function api(path, options = {}) {
   const token = localStorage.getItem(TOKEN_KEY);
   const headers = { "content-type": "application/json", ...(options.headers || {}) };
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -127,6 +128,7 @@ async function sendFileReply(ticketId, file, caption, isVoiceNote) {
 }
 
 export default function ThreadlineCRM() {
+  const [view, setView] = useState("tickets"); // "tickets" | "analytics"
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -474,6 +476,24 @@ export default function ThreadlineCRM() {
             <Circle size={7} fill={connected ? C.green : C.coral} color={connected ? C.green : C.coral} />
             {connected ? "API connected · Launchpad Support Line" : "API unreachable"}
           </div>
+          <div className="flex gap-1.5">
+            {[
+              { key: "tickets", label: "Tickets" },
+              { key: "analytics", label: "Analytics" },
+            ].map((v) => (
+              <button
+                key={v.key}
+                onClick={() => setView(v.key)}
+                style={{
+                  background: view === v.key ? C.green : C.inkSoft,
+                  color: view === v.key ? "#fff" : C.slateLight,
+                }}
+                className="text-xs px-3 py-1.5 rounded-full font-medium transition-colors"
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-4">
           {statBar.map((s) => (
@@ -496,6 +516,11 @@ export default function ThreadlineCRM() {
       </div>
 
       {/* Body */}
+      {view === "analytics" ? (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <AnalyticsView onUnauthorized={handleLogout} />
+        </div>
+      ) : (
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Sidebar */}
         <div
@@ -973,6 +998,7 @@ export default function ThreadlineCRM() {
           </div>
         )}
       </div>
+      )}
 
       {/* Toast */}
       {toast && (
