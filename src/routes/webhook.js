@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { handleIncomingMessage } from "../services/ticketService.js";
+import { handleIncomingMessage, logAgentMessageFromPhone, normalizePhone } from "../services/ticketService.js";
 
 const router = Router();
 
@@ -17,8 +17,13 @@ router.post("/whapi", async (req, res) => {
 
   try {
     for (const msg of messages) {
-      if (msg.from_me) continue; // ignore our own outgoing messages echoed back
       if (!SUPPORTED_TYPES.includes(msg.type)) continue;
+      if (!msg.chat_id || msg.chat_id.endsWith("@g.us")) continue; // skip groups
+
+      // Whapi's `from` is always the channel's own number when from_me is
+      // true, so chat_id (the customer's number either way) is the only
+      // reliable source of the customer's phone for both directions.
+      const customerPhone = normalizePhone(msg.chat_id);
 
       let text = null;
       let mediaUrl = null;
@@ -38,17 +43,30 @@ router.post("/whapi", async (req, res) => {
         caption = media.caption || null;
       }
 
-      await handleIncomingMessage({
-        phone: msg.from,
-        name: msg.from_name,
-        type: msg.type,
-        text,
-        mediaUrl,
-        mimeType,
-        filename,
-        caption,
-        whapiMessageId: msg.id,
-      });
+      if (msg.from_me) {
+        await logAgentMessageFromPhone({
+          phone: customerPhone,
+          type: msg.type,
+          text,
+          mediaUrl,
+          mimeType,
+          filename,
+          caption,
+          whapiMessageId: msg.id,
+        });
+      } else {
+        await handleIncomingMessage({
+          phone: customerPhone,
+          name: msg.from_name,
+          type: msg.type,
+          text,
+          mediaUrl,
+          mimeType,
+          filename,
+          caption,
+          whapiMessageId: msg.id,
+        });
+      }
     }
     res.status(200).json({ ok: true });
   } catch (err) {

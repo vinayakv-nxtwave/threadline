@@ -186,3 +186,48 @@ export async function handleIncomingMessage({
 
   return { ticket, reopened };
 }
+
+/**
+ * Entry point for messages an agent sends directly from the connected
+ * WhatsApp phone (not through the CRM's /reply endpoint). Whapi reports
+ * these as from_me: true webhook events. Logs them as outbound on the
+ * matching ticket, deduping against the echo of a CRM-sent reply.
+ */
+export async function logAgentMessageFromPhone({
+  phone,
+  type,
+  text,
+  mediaUrl,
+  mimeType,
+  filename,
+  caption,
+  whapiMessageId,
+}) {
+  const normalizedPhone = normalizePhone(phone);
+  const ticket = await findLatestTicketByPhone(normalizedPhone);
+  if (!ticket) return null; // no matching ticket, nothing to attach this to
+
+  // Skip if this exact message was already logged (e.g. sent via the CRM's
+  // own /reply endpoint, which Whapi then echoes back as from_me:true).
+  const { rows } = await pool.query(
+    `SELECT 1 FROM messages WHERE whapi_message_id = $1 LIMIT 1`,
+    [whapiMessageId]
+  );
+  if (rows.length) return ticket;
+
+  await addMessage(ticket.id, "outbound", {
+    messageType: type,
+    body: text ?? caption ?? null,
+    mediaUrl,
+    mimeType,
+    filename,
+    caption,
+    whapiMessageId,
+  });
+
+  if (ticket.status === "new") {
+    await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [ticket.id]);
+  }
+
+  return ticket;
+}
