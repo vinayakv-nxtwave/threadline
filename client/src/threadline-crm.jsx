@@ -134,7 +134,7 @@ export default function ThreadlineCRM() {
   const [loginError, setLoginError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
   const [tickets, setTickets] = useState([]);
-  const [stats, setStats] = useState({ avgResolutionSeconds: null, avgResponseSeconds: null });
+  const [stats, setStats] = useState({ avgResolutionSeconds: null, avgTurnaroundSeconds: null });
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(true);
   const [selectedId, setSelectedId] = useState(null);
@@ -382,8 +382,8 @@ export default function ThreadlineCRM() {
     { label: "Pending", value: counts.pending || 0, color: C.amber },
     { label: "New", value: counts.new || 0, color: C.coral },
     {
-      label: "Avg Response",
-      value: stats.avgResponseSeconds != null ? formatDuration(stats.avgResponseSeconds) : "—",
+      label: "Avg Turnaround",
+      value: stats.avgTurnaroundSeconds != null ? formatDuration(stats.avgTurnaroundSeconds) : "—",
       color: C.slateLight,
     },
   ];
@@ -639,6 +639,28 @@ export default function ThreadlineCRM() {
                         {t.ticket_no}
                       </span>
                     </div>
+                    <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                      <span
+                        style={{ color: PRIORITY[t.priority]?.color }}
+                        className="text-[10px] font-medium"
+                      >
+                        {PRIORITY[t.priority]?.label || t.priority}
+                      </span>
+                      {t.turnaroundSeconds != null ? (
+                        <span className="text-[10px] mono" style={{ color: C.slateLight }}>
+                          ⏱ {formatDuration(t.turnaroundSeconds)}
+                        </span>
+                      ) : (
+                        <span className="text-[10px]" style={{ color: C.coral }}>
+                          awaiting reply
+                        </span>
+                      )}
+                      {t.resolutionSeconds != null && (
+                        <span className="text-[10px] mono" style={{ color: C.slateLight }}>
+                          ✓ {formatDuration(t.resolutionSeconds)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </button>
               );
@@ -839,14 +861,14 @@ export default function ThreadlineCRM() {
               <Phone size={13} /> <span className="mono">{selected.student_phone}</span>
             </div>
 
-            {selected.responseTime?.status === "awaiting_reply" && (
+            {selected.turnaroundTime?.status === "awaiting_reply" && (
               <div className="text-xs" style={{ color: C.coral }}>
-                Waiting {formatDuration(selected.responseTime.waitingSeconds)} for a reply
+                Waiting {formatDuration(selected.turnaroundTime.waitingSeconds)} for first reply
               </div>
             )}
-            {selected.responseTime?.status === "replied" && (
+            {selected.turnaroundTime?.status === "replied" && (
               <div className="text-xs" style={{ color: C.slate }}>
-                Last response time: {formatDuration(selected.responseTime.responseSeconds)}
+                Turnaround time: {formatDuration(selected.turnaroundTime.turnaroundSeconds)}
               </div>
             )}
             {selected.resolutionSeconds != null && (

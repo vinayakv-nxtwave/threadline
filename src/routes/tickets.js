@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 import { pool } from "../db.js";
-import { addMessage, getResponseTime } from "../services/ticketService.js";
+import { addMessage, getTurnaroundTime } from "../services/ticketService.js";
 import { sendText, sendMedia } from "../services/whapiClient.js";
 
 const router = Router();
@@ -30,7 +30,16 @@ router.get("/", async (req, res) => {
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const { rows } = await pool.query(
-    `SELECT t.*, lm.body AS last_message_body, lm.direction AS last_message_direction
+    `SELECT t.*, lm.body AS last_message_body, lm.direction AS last_message_direction,
+       EXTRACT(EPOCH FROM (
+         (SELECT MIN(m.created_at) FROM messages m
+          WHERE m.ticket_id = t.id AND m.direction = 'outbound'
+            AND m.created_at > COALESCE(t.last_reopened_at, t.created_at))
+         - COALESCE(t.last_reopened_at, t.created_at)
+       )) AS turnaround_seconds,
+       CASE WHEN t.resolved_at IS NOT NULL THEN
+         EXTRACT(EPOCH FROM (t.resolved_at - COALESCE(t.last_reopened_at, t.created_at)))
+       END AS resolution_seconds
      FROM tickets t
      LEFT JOIN LATERAL (
        SELECT body, direction FROM messages WHERE ticket_id = t.id ORDER BY created_at DESC LIMIT 1
@@ -39,7 +48,13 @@ router.get("/", async (req, res) => {
      ORDER BY t.last_message_at DESC`,
     params
   );
-  res.json(rows);
+  res.json(
+    rows.map((r) => ({
+      ...r,
+      turnaroundSeconds: r.turnaround_seconds != null ? Math.round(r.turnaround_seconds) : null,
+      resolutionSeconds: r.resolution_seconds != null ? Math.round(r.resolution_seconds) : null,
+    }))
+  );
 });
 
 // GET /api/tickets/stats/summary -> dashboard-wide average response/resolution times
@@ -50,25 +65,24 @@ router.get("/stats/summary", async (req, res) => {
     FROM tickets WHERE resolved_at IS NOT NULL
   `);
 
-  const { rows: avgResponse } = await pool.query(`
+  const { rows: avgTurnaround } = await pool.query(`
     WITH pairs AS (
-      SELECT m1.ticket_id, m1.created_at AS inbound_at,
-             MIN(m2.created_at) AS reply_at
-      FROM messages m1
-      JOIN messages m2
-        ON m2.ticket_id = m1.ticket_id
-       AND m2.direction = 'outbound'
-       AND m2.created_at > m1.created_at
-      WHERE m1.direction = 'inbound'
-      GROUP BY m1.ticket_id, m1.created_at
+      SELECT t.id AS ticket_id,
+             COALESCE(t.last_reopened_at, t.created_at) AS opened_at,
+             MIN(m.created_at) AS reply_at
+      FROM tickets t
+      JOIN messages m ON m.ticket_id = t.id
+        AND m.direction = 'outbound'
+        AND m.created_at > COALESCE(t.last_reopened_at, t.created_at)
+      GROUP BY t.id, t.last_reopened_at, t.created_at
     )
-    SELECT AVG(EXTRACT(EPOCH FROM (reply_at - inbound_at))) AS avg_seconds
+    SELECT AVG(EXTRACT(EPOCH FROM (reply_at - opened_at))) AS avg_seconds
     FROM pairs
   `);
 
   res.json({
     avgResolutionSeconds: avgResolution[0].avg_seconds ? Math.round(avgResolution[0].avg_seconds) : null,
-    avgResponseSeconds: avgResponse[0].avg_seconds ? Math.round(avgResponse[0].avg_seconds) : null,
+    avgTurnaroundSeconds: avgTurnaround[0].avg_seconds ? Math.round(avgTurnaround[0].avg_seconds) : null,
   });
 });
 
@@ -85,14 +99,14 @@ router.get("/:id", async (req, res) => {
     [req.params.id]
   );
 
-  const responseTime = await getResponseTime(ticket.id);
+  const turnaroundTime = await getTurnaroundTime(ticket.id);
   const resolutionSeconds = ticket.resolved_at
     ? Math.floor(
         (new Date(ticket.resolved_at) - new Date(ticket.last_reopened_at || ticket.created_at)) / 1000
       )
     : null;
 
-  res.json({ ...ticket, messages, responseTime, resolutionSeconds });
+  res.json({ ...ticket, messages, turnaroundTime, resolutionSeconds });
 });
 
 // PATCH /api/tickets/:id  -> update status / category / priority / assignee / notes / tags

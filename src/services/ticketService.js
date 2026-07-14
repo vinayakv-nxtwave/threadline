@@ -110,37 +110,37 @@ export async function reopenIfNeeded(ticket, text) {
 }
 
 /**
- * Response time for a ticket: the gap between its most recent inbound message
- * and the next outbound message sent after it. If that inbound message hasn't
- * been answered yet, returns how long the student has been waiting so far
- * instead of a fixed duration.
+ * Turnaround time for a ticket: the gap between when it most recently opened
+ * (original creation, or the last reopen) and the first agent reply after
+ * that point — same anchor point resolution time uses, for consistency. If
+ * there's no reply yet in this cycle, returns how long the student has been
+ * waiting so far instead of a fixed duration.
  */
-export async function getResponseTime(ticketId) {
+export async function getTurnaroundTime(ticketId) {
   const { rows } = await pool.query(
-    `WITH last_inbound AS (
-       SELECT created_at AS inbound_at FROM messages
-       WHERE ticket_id = $1 AND direction = 'inbound'
-       ORDER BY created_at DESC LIMIT 1
+    `WITH ref AS (
+       SELECT COALESCE(last_reopened_at, created_at) AS opened_at
+       FROM tickets WHERE id = $1
      ),
-     next_outbound AS (
+     first_reply AS (
        SELECT MIN(m.created_at) AS reply_at
-       FROM messages m, last_inbound li
-       WHERE m.ticket_id = $1 AND m.direction = 'outbound' AND m.created_at > li.inbound_at
+       FROM messages m, ref r
+       WHERE m.ticket_id = $1 AND m.direction = 'outbound' AND m.created_at > r.opened_at
      )
-     SELECT li.inbound_at, no.reply_at FROM last_inbound li, next_outbound no`,
+     SELECT ref.opened_at, first_reply.reply_at FROM ref, first_reply`,
     [ticketId]
   );
   const row = rows[0];
-  if (!row || !row.inbound_at) return { status: "no_inbound_yet" };
+  if (!row || !row.opened_at) return { status: "no_data" };
   if (!row.reply_at) {
     return {
       status: "awaiting_reply",
-      waitingSeconds: Math.max(0, Math.floor((Date.now() - new Date(row.inbound_at)) / 1000)),
+      waitingSeconds: Math.max(0, Math.floor((Date.now() - new Date(row.opened_at)) / 1000)),
     };
   }
   return {
     status: "replied",
-    responseSeconds: Math.floor((new Date(row.reply_at) - new Date(row.inbound_at)) / 1000),
+    turnaroundSeconds: Math.floor((new Date(row.reply_at) - new Date(row.opened_at)) / 1000),
   };
 }
 
