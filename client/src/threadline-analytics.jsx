@@ -3,7 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from "recharts";
-import { Clock, CheckCircle2, Inbox, TrendingUp, Users } from "lucide-react";
+import { Clock, CheckCircle2, Inbox, TrendingUp, Users, Search } from "lucide-react";
 import { C, STATUS, PRIORITY, CATEGORY, formatDuration, api } from "./threadline-crm.jsx";
 
 const RANGES = [
@@ -47,6 +47,9 @@ export default function AnalyticsView({ onUnauthorized }) {
   const [data, setData] = useState(null);
   const [tickets, setTickets] = useState([]);
   const [ticketStatusFilter, setTicketStatusFilter] = useState("all");
+  const [ticketCategoryFilter, setTicketCategoryFilter] = useState("all");
+  const [ticketPriorityFilter, setTicketPriorityFilter] = useState("all");
+  const [ticketSearch, setTicketSearch] = useState("");
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -336,33 +339,81 @@ export default function AnalyticsView({ onUnauthorized }) {
 
       {/* Per-ticket table */}
       <div style={{ background: C.card, border: `1px solid ${C.line}` }} className="rounded-xl p-4 mt-5">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div className="text-sm font-medium">All tickets</div>
-          <select
-            value={ticketStatusFilter}
-            onChange={(e) => setTicketStatusFilter(e.target.value)}
-            style={{ background: C.paperDim, color: C.slate, border: "none" }}
-            className="text-xs rounded-lg px-2.5 py-1.5 outline-none"
-          >
-            <option value="all">All statuses</option>
-            {Object.entries(STATUS).map(([key, meta]) => (
-              <option key={key} value={key}>
-                {meta.label}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div
+              style={{ background: C.paperDim }}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5"
+            >
+              <Search size={12} color={C.slateLight} />
+              <input
+                value={ticketSearch}
+                onChange={(e) => setTicketSearch(e.target.value)}
+                placeholder="Search ticket, name, phone"
+                style={{ background: "transparent", color: C.ink, width: 150 }}
+                className="text-xs outline-none placeholder:text-slate-400"
+              />
+            </div>
+            <select
+              value={ticketCategoryFilter}
+              onChange={(e) => setTicketCategoryFilter(e.target.value)}
+              style={{ background: C.paperDim, color: C.slate, border: "none" }}
+              className="text-xs rounded-lg px-2.5 py-1.5 outline-none"
+            >
+              <option value="all">All categories</option>
+              {Object.entries(CATEGORY).map(([key, meta]) => (
+                <option key={key} value={key}>
+                  {meta.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={ticketPriorityFilter}
+              onChange={(e) => setTicketPriorityFilter(e.target.value)}
+              style={{ background: C.paperDim, color: C.slate, border: "none" }}
+              className="text-xs rounded-lg px-2.5 py-1.5 outline-none"
+            >
+              <option value="all">All priorities</option>
+              {Object.entries(PRIORITY).map(([key, meta]) => (
+                <option key={key} value={key}>
+                  {meta.label}
+                </option>
+              ))}
+            </select>
+            <select
+              value={ticketStatusFilter}
+              onChange={(e) => setTicketStatusFilter(e.target.value)}
+              style={{ background: C.paperDim, color: C.slate, border: "none" }}
+              className="text-xs rounded-lg px-2.5 py-1.5 outline-none"
+            >
+              <option value="all">All statuses</option>
+              {Object.entries(STATUS).map(([key, meta]) => (
+                <option key={key} value={key}>
+                  {meta.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         {(() => {
-          const filteredTickets = tickets.filter((t) =>
-            ticketStatusFilter === "all" ? true : t.status === ticketStatusFilter
-          );
+          const q = ticketSearch.trim().toLowerCase();
+          const filteredTickets = tickets
+            .filter((t) => (ticketStatusFilter === "all" ? true : t.status === ticketStatusFilter))
+            .filter((t) => (ticketCategoryFilter === "all" ? true : t.category === ticketCategoryFilter))
+            .filter((t) => (ticketPriorityFilter === "all" ? true : t.priority === ticketPriorityFilter))
+            .filter((t) =>
+              q === ""
+                ? true
+                : ((t.student_name || "") + t.student_phone + t.ticket_no).toLowerCase().includes(q)
+            );
           if (tickets.length === 0) {
             return <div className="text-xs" style={{ color: C.slateLight }}>No tickets yet.</div>;
           }
           if (filteredTickets.length === 0) {
             return (
               <div className="text-xs" style={{ color: C.slateLight }}>
-                No tickets with this status.
+                No tickets match these filters.
               </div>
             );
           }
