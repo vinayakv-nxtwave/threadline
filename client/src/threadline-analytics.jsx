@@ -46,6 +46,7 @@ export default function AnalyticsView({ onUnauthorized }) {
   const [range, setRange] = useState("14d");
   const [data, setData] = useState(null);
   const [tickets, setTickets] = useState([]);
+  const [ticketStatusFilter, setTicketStatusFilter] = useState("all");
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -335,43 +336,71 @@ export default function AnalyticsView({ onUnauthorized }) {
 
       {/* Per-ticket table */}
       <div style={{ background: C.card, border: `1px solid ${C.line}` }} className="rounded-xl p-4 mt-5">
-        <div className="text-sm font-medium mb-3">All tickets</div>
-        {tickets.length === 0 ? (
-          <div className="text-xs" style={{ color: C.slateLight }}>No tickets yet.</div>
-        ) : (
-          <table className="w-full text-xs">
-            <thead>
-              <tr style={{ color: C.slateLight, borderColor: C.line }} className="text-left border-b">
-                <th className="pb-2 font-medium">Ticket</th>
-                <th className="pb-2 font-medium">Category</th>
-                <th className="pb-2 font-medium">Priority</th>
-                <th className="pb-2 font-medium">Status</th>
-                <th className="pb-2 font-medium">Turnaround</th>
-                <th className="pb-2 font-medium">Resolution</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tickets.map((t) => (
-                <tr key={t.id} style={{ borderColor: C.line }} className="border-b last:border-0">
-                  <td className="py-2 mono">{t.ticket_no}</td>
-                  <td className="py-2" style={{ color: CATEGORY[t.category]?.color }}>
-                    {CATEGORY[t.category]?.label || t.category}
-                  </td>
-                  <td className="py-2" style={{ color: PRIORITY[t.priority]?.color }}>
-                    {PRIORITY[t.priority]?.label || t.priority}
-                  </td>
-                  <td className="py-2">{STATUS[t.status]?.label || t.status}</td>
-                  <td className="py-2 mono">
-                    {t.turnaroundSeconds != null ? formatDuration(t.turnaroundSeconds) : "—"}
-                  </td>
-                  <td className="py-2 mono">
-                    {t.resolutionSeconds != null ? formatDuration(t.resolutionSeconds) : "—"}
-                  </td>
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-sm font-medium">All tickets</div>
+          <select
+            value={ticketStatusFilter}
+            onChange={(e) => setTicketStatusFilter(e.target.value)}
+            style={{ background: C.paperDim, color: C.slate, border: "none" }}
+            className="text-xs rounded-lg px-2.5 py-1.5 outline-none"
+          >
+            <option value="all">All statuses</option>
+            {Object.entries(STATUS).map(([key, meta]) => (
+              <option key={key} value={key}>
+                {meta.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        {(() => {
+          const filteredTickets = tickets.filter((t) =>
+            ticketStatusFilter === "all" ? true : t.status === ticketStatusFilter
+          );
+          if (tickets.length === 0) {
+            return <div className="text-xs" style={{ color: C.slateLight }}>No tickets yet.</div>;
+          }
+          if (filteredTickets.length === 0) {
+            return (
+              <div className="text-xs" style={{ color: C.slateLight }}>
+                No tickets with this status.
+              </div>
+            );
+          }
+          return (
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{ color: C.slateLight, borderColor: C.line }} className="text-left border-b">
+                  <th className="pb-2 font-medium">Ticket</th>
+                  <th className="pb-2 font-medium">Category</th>
+                  <th className="pb-2 font-medium">Priority</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 font-medium">Turnaround</th>
+                  <th className="pb-2 font-medium">Resolution</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+              </thead>
+              <tbody>
+                {filteredTickets.map((t) => (
+                  <tr key={t.id} style={{ borderColor: C.line }} className="border-b last:border-0">
+                    <td className="py-2 mono">{t.ticket_no}</td>
+                    <td className="py-2" style={{ color: CATEGORY[t.category]?.color }}>
+                      {CATEGORY[t.category]?.label || t.category}
+                    </td>
+                    <td className="py-2" style={{ color: PRIORITY[t.priority]?.color }}>
+                      {PRIORITY[t.priority]?.label || t.priority}
+                    </td>
+                    <td className="py-2">{STATUS[t.status]?.label || t.status}</td>
+                    <td className="py-2 mono">
+                      {t.turnaroundSeconds != null ? formatDuration(t.turnaroundSeconds) : "—"}
+                    </td>
+                    <td className="py-2 mono">
+                      {t.resolutionSeconds != null ? formatDuration(t.resolutionSeconds) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          );
+        })()}
       </div>
     </div>
   );
