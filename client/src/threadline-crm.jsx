@@ -445,7 +445,7 @@ export default function ThreadlineCRM() {
   return (
     <div
       style={{ fontFamily: "'Inter', sans-serif", background: C.paper, color: C.ink }}
-      className="w-full h-full min-h-screen flex flex-col"
+      className="w-full h-screen flex flex-col"
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
