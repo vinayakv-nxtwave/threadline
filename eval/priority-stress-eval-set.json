@@ -1,0 +1,69 @@
+[
+  {
+    "id": 101,
+    "message": "Hey, kind of need this sorted soon-ish, my exam is tomorrow morning and I still can't access the portal",
+    "expectedCategory": "access",
+    "expectedPriority": "high",
+    "notes": "understated tone ('kind of', 'soon-ish'), no urgent keyword or exclamation, but a real next-day deadline plus a blocker -- confirmed high, not urgent: urgent means same-hour time pressure, a next-morning deadline is high even with an active blocker"
+  },
+  {
+    "id": 102,
+    "message": "Could someone please look at this when you get a chance? My exam starts in an hour and the portal won't load.",
+    "expectedCategory": "technical",
+    "expectedPriority": "urgent",
+    "notes": "polite phrasing ('when you get a chance') directly contradicts the actual deadline -- exam in an hour is close enough to the spec's own 'exam is starting' urgent example that the polite wrapper shouldn't downgrade it"
+  },
+  {
+    "id": 103,
+    "message": "Oh wonderful, the video's buffering again. Third time this week. Really enjoying this experience.",
+    "expectedCategory": "technical",
+    "expectedPriority": "high",
+    "notes": "sarcasm masking real frustration about a recurring blocking issue -- proposed high (clear complaint/frustration + blocking), not urgent, since there's no time-critical-right-now element"
+  },
+  {
+    "id": 104,
+    "message": "The live class video call isn't connecting for anyone in today's session, the whole batch is stuck outside.",
+    "expectedCategory": "session",
+    "expectedPriority": "urgent",
+    "notes": "flat, calm tone with zero exclamation marks or urgency keywords, but describes a session happening right now with broad impact -- content should override tone here"
+  },
+  {
+    "id": 105,
+    "conversation": [
+      { "direction": "inbound", "body": "Hi, I have a small doubt about DP" },
+      { "direction": "inbound", "body": "actually nvm, more urgent -- my live session link isn't opening and it starts in 3 minutes" }
+    ],
+    "expectedCategory": "session",
+    "expectedPriority": "urgent",
+    "notes": "urgency only becomes clear in the second message -- tests the same context-awareness the category fix relies on, but for priority; near-exact match to the spec's own 'class starts in 5 minutes' urgent example"
+  },
+  {
+    "id": 106,
+    "conversation": [
+      { "direction": "inbound", "body": "Hey, my payment page is stuck loading" },
+      { "direction": "inbound", "body": "It's been like this for 20 minutes" },
+      { "direction": "inbound", "body": "The course session I paid for starts in 15 minutes and I still can't confirm the payment went through" }
+    ],
+    "expectedCategory": "payment",
+    "expectedPriority": "urgent",
+    "notes": "escalating multi-turn with no 'urgent' keyword anywhere -- urgency has to be inferred from the 15-minute deadline stated flatly in the third message; lowest-confidence case in this batch, could plausibly be argued as high instead since the blocker is nominally a payment confirmation rather than the session access itself"
+  },
+  {
+    "id": 107,
+    "conversation": [
+      { "direction": "inbound", "body": "hi" },
+      { "direction": "inbound", "body": "just letting you know the certificate download link seems broken" },
+      { "direction": "inbound", "body": "also just realized today is the last day to submit for placement documentation and the link still isn't working" }
+    ],
+    "expectedCategory": "certificate",
+    "expectedPriority": "high",
+    "notes": "same-day hard deadline stated calmly -- confirmed high, not urgent: same-day deadlines with an active blocker are explicitly high per the tightened priority definitions, even when calmly worded"
+  },
+  {
+    "id": 108,
+    "message": "No rush at all, just wondering if there's a live session about DSA sometime in the coming weeks.",
+    "expectedCategory": "session",
+    "expectedPriority": "low",
+    "notes": "negative control -- explicitly low-urgency language paired with session-related content, to check the classifier isn't just pattern-matching on category keywords and over-calling urgency across the board"
+  }
+]

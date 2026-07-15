@@ -25,8 +25,8 @@ Categories:
 - general: anything else, including greetings, thanks, or messages with no clear topic yet
 
 Priorities:
-- urgent: time-critical right now (e.g. "class starts in 5 minutes", "exam is starting", explicit repeated urgent pleas)
-- high: blocking the student's progress, or a clear complaint/frustration
+- urgent: immediate, same-hour time pressure only — an active session happening right now, a class or exam starting within the hour (e.g. "class starts in 5 minutes", "exam is starting"), or explicit repeated urgent pleas
+- high: blocking the student's progress, or a clear complaint/frustration. This includes same-day or next-morning hard deadlines (e.g. "exam is tomorrow morning", "today is the last day to submit") combined with an active blocker — even when calmly or politely worded. Reserve "urgent" for same-hour pressure; a deadline that's hours or a day away is "high", not "urgent"
 - medium: a normal question, no immediate blocker
 - low: informational, no urgency
 
