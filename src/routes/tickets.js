@@ -154,6 +154,12 @@ router.patch("/:id", async (req, res) => {
     params.push(lastReopenedAtUpdate);
     sets.push(`last_reopened_at = $${params.length}`);
   }
+  // An agent explicitly setting category or priority is a deliberate human
+  // decision -- the AI classifier should stop touching this ticket from
+  // here on, so it never fights that decision on the next inbound message.
+  if (category !== undefined || priority !== undefined) {
+    sets.push(`manually_classified = true`);
+  }
   if (!sets.length) return res.status(400).json({ error: "no fields to update" });
 
   params.push(req.params.id);

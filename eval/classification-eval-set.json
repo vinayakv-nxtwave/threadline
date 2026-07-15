@@ -1,0 +1,139 @@
+[
+  {
+    "id": 1,
+    "message": "My certificate has the wrong spelling of my name, can you fix it?",
+    "expectedCategory": "certificate",
+    "expectedPriority": "medium",
+    "notes": "single-message, straightforward certificate correction"
+  },
+  {
+    "id": 2,
+    "message": "My EMI payment failed today, will I get charged a penalty?",
+    "expectedCategory": "payment",
+    "expectedPriority": "high",
+    "notes": "single-message, payment failure with a real financial consequence at stake"
+  },
+  {
+    "id": 3,
+    "message": "The live class link isn't working, class starts in 5 minutes!!",
+    "expectedCategory": "session",
+    "expectedPriority": "urgent",
+    "notes": "time-critical session issue, should be urgent"
+  },
+  {
+    "id": 4,
+    "message": "I forgot my password and I'm locked out of my account",
+    "expectedCategory": "access",
+    "expectedPriority": "high",
+    "notes": "being locked out is itself blocking, per the priority spec's own definition of high"
+  },
+  {
+    "id": 5,
+    "message": "Can someone explain the difference between a stack and a queue?",
+    "expectedCategory": "doubt",
+    "expectedPriority": "medium",
+    "notes": "a direct question needing an answer is 'a normal question' (medium), not purely informational (low)"
+  },
+  {
+    "id": 6,
+    "message": "The video keeps buffering and won't load at all, this is really frustrating",
+    "expectedCategory": "technical",
+    "expectedPriority": "high",
+    "notes": "blocking technical issue with clear frustration"
+  },
+  {
+    "id": 7,
+    "message": "Hi",
+    "expectedCategory": "general",
+    "expectedPriority": "medium",
+    "notes": "no signal at all, should stay general/medium rather than guessing"
+  },
+  {
+    "id": 8,
+    "message": "Thank you so much for your help!",
+    "expectedCategory": "general",
+    "expectedPriority": "low",
+    "notes": "closing/thanks message, no real topic"
+  },
+  {
+    "id": 9,
+    "message": "When will I get my placement assistance details?",
+    "expectedCategory": "certificate",
+    "expectedPriority": "medium",
+    "notes": "placement assistance falls under the certificate/placement category per spec"
+  },
+  {
+    "id": 10,
+    "message": "URGENT URGENT my exam is starting right now and I can't log in!!!",
+    "expectedCategory": "access",
+    "expectedPriority": "urgent",
+    "notes": "explicit repeated urgency plus a real time-critical blocker"
+  },
+  {
+    "id": 11,
+    "message": "Just wanted to let you know the last session recording was really helpful",
+    "expectedCategory": "general",
+    "expectedPriority": "low",
+    "notes": "a compliment with no actionable issue -- 'session' is for session issues, this isn't one, so it falls to general"
+  },
+  {
+    "id": 12,
+    "message": "I want a refund for the course, it's not what I expected",
+    "expectedCategory": "payment",
+    "expectedPriority": "high",
+    "notes": "refund request with dissatisfaction, should be flagged higher than routine"
+  },
+  {
+    "id": 13,
+    "message": "My assignment submission is showing an error when I try to upload",
+    "expectedCategory": "technical",
+    "expectedPriority": "high",
+    "notes": "an error blocking assignment submission is blocking the student's progress -- high per spec"
+  },
+  {
+    "id": 14,
+    "message": "Can you explain recursion with an example?",
+    "expectedCategory": "doubt",
+    "expectedPriority": "medium",
+    "notes": "same reasoning as case 5 -- a direct question is medium, not low"
+  },
+  {
+    "id": 15,
+    "message": "I didn't receive the OTP for verification, tried 3 times already",
+    "expectedCategory": "access",
+    "expectedPriority": "high",
+    "notes": "repeated OTP failure blocking the student"
+  },
+  {
+    "id": 44,
+    "conversation": [
+      { "direction": "inbound", "body": "Hi" },
+      { "direction": "outbound", "body": "Hi! How can we help you today?" },
+      { "direction": "inbound", "body": "The mentor session for today got cancelled without notice, and I had cleared my whole evening for it" }
+    ],
+    "expectedCategory": "session",
+    "expectedPriority": "high",
+    "notes": "multi-turn: opener has no signal, real issue and frustration only appears in the third message"
+  },
+  {
+    "id": 45,
+    "conversation": [
+      { "direction": "inbound", "body": "Hello" },
+      { "direction": "inbound", "body": "I attended the DSA session yesterday" },
+      { "direction": "inbound", "body": "Just wanted to say thanks, it was really useful" }
+    ],
+    "expectedCategory": "general",
+    "expectedPriority": "low",
+    "notes": "multi-turn conversation that resolves to a thanks/no-action-needed message"
+  },
+  {
+    "id": 46,
+    "conversation": [
+      { "direction": "inbound", "body": "Hi" },
+      { "direction": "inbound", "body": "When will my next EMI be deducted?" }
+    ],
+    "expectedCategory": "payment",
+    "expectedPriority": "medium",
+    "notes": "the exact Hi-then-payment scenario this feature was built to fix"
+  }
+]

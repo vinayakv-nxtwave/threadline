@@ -1,4 +1,5 @@
 import { pool } from "../db.js";
+import { classifyTicket } from "./classifier.js";
 
 export function normalizePhone(raw) {
   return String(raw).replace(/\D/g, "");
@@ -12,43 +13,12 @@ export async function findLatestTicketByPhone(phone) {
   return rows[0] || null;
 }
 
-const CATEGORY_KEYWORDS = [
-  { category: "certificate", pattern: /\b(certificate|placement)\b/ },
-  { category: "payment", pattern: /\b(emi|payment|refund|fee|fees|invoice)\b/ },
-  { category: "session", pattern: /\b(live class|live session|mentor|webinar)\b/ },
-  { category: "access", pattern: /\b(password|log ?in|account access|otp|locked out)\b/ },
-  { category: "doubt", pattern: /\b(doubt|explain|understand|concept|assignment)\b/ },
-  { category: "technical", pattern: /\b(not working|error|bug|crash|video|buffering|link)\b/ },
-];
-
-/**
- * Scans the student's first message for keywords to pick a sensible starting
- * category/priority, so new tickets aren't all dumped into "general/medium".
- * Agents can always override afterward.
- */
-export function classifyMessage(text) {
-  const lower = String(text || "").toLowerCase();
-
-  let priority = "medium";
-  const exclaims = (lower.match(/!/g) || []).length;
-  if (/\burgent(ly)?\b|\b(asap|emergency|immediately|right now)\b/.test(lower) || exclaims >= 2) {
-    priority = "urgent";
-  } else if (/\b(important|quick|quickly|soon)\b/.test(lower)) {
-    priority = "high";
-  }
-
-  const category = CATEGORY_KEYWORDS.find((rule) => rule.pattern.test(lower))?.category || "general";
-
-  return { category, priority };
-}
-
-export async function createTicket({ phone, name, text }) {
-  const { category, priority } = classifyMessage(text);
+export async function createTicket({ phone, name }) {
   const { rows } = await pool.query(
-    `INSERT INTO tickets (student_phone, student_name, status, category, priority)
-     VALUES ($1, $2, 'new', $3, $4)
+    `INSERT INTO tickets (student_phone, student_name, status)
+     VALUES ($1, $2, 'new')
      RETURNING *`,
-    [phone, name || null, category, priority]
+    [phone, name || null]
   );
   const ticket = rows[0];
 
@@ -85,21 +55,20 @@ export async function addMessage(
 /**
  * The core rule: a ticket cannot sit closed or resolved once the student has
  * something new to say. If the student messages in on a resolved/closed
- * ticket, it snaps back open — treated as a new query, so category/priority
- * are re-classified from this message same as a brand new ticket. If they
- * message on a "pending" ticket (waiting on them), it's a continuation of
- * the same query, so it just moves to "open" (waiting on us again) without
- * touching classification.
+ * ticket, it snaps back open — treated as a new query. Category/priority
+ * reclassification happens separately in handleIncomingMessage via the AI
+ * classifier, which runs on every inbound message regardless of reopen. If
+ * they message on a "pending" ticket (waiting on them), it's a continuation
+ * of the same query, so it just moves to "open" (waiting on us again).
  * Returns true if the ticket was reopened from resolved/closed.
  */
-export async function reopenIfNeeded(ticket, text) {
+export async function reopenIfNeeded(ticket) {
   if (ticket.status === "resolved" || ticket.status === "closed") {
-    const { category, priority } = classifyMessage(text);
     await pool.query(
       `UPDATE tickets
-       SET status = 'open', category = $2, priority = $3, resolved_at = NULL, last_reopened_at = now()
+       SET status = 'open', resolved_at = NULL, last_reopened_at = now()
        WHERE id = $1`,
-      [ticket.id, category, priority]
+      [ticket.id]
     );
     return true;
   }
@@ -163,12 +132,11 @@ export async function handleIncomingMessage({
   const normalizedPhone = normalizePhone(phone);
   let ticket = await findLatestTicketByPhone(normalizedPhone);
   let reopened = false;
-  const classifyText = text ?? caption ?? "";
 
   if (!ticket) {
-    ticket = await createTicket({ phone: normalizedPhone, name, text: classifyText });
+    ticket = await createTicket({ phone: normalizedPhone, name });
   } else {
-    reopened = await reopenIfNeeded(ticket, classifyText);
+    reopened = await reopenIfNeeded(ticket);
     if (!ticket.student_name && name) {
       await pool.query(`UPDATE tickets SET student_name = $1 WHERE id = $2`, [name, ticket.id]);
     }
@@ -183,6 +151,21 @@ export async function handleIncomingMessage({
     caption,
     whapiMessageId,
   });
+
+  if (!ticket.manually_classified) {
+    const { rows: allMessages } = await pool.query(
+      `SELECT direction, body FROM messages WHERE ticket_id = $1 ORDER BY created_at ASC`,
+      [ticket.id]
+    );
+    const classification = await classifyTicket(allMessages);
+    if (classification) {
+      await pool.query(`UPDATE tickets SET category = $1, priority = $2 WHERE id = $3`, [
+        classification.category,
+        classification.priority,
+        ticket.id,
+      ]);
+    }
+  }
 
   return { ticket, reopened };
 }
