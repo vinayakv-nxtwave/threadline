@@ -1,0 +1,39 @@
+description: Threadline ticket classifier eval (category + priority)
+
+# The provider ignores this rendered text and reads context.vars.conversation
+# directly (so it gets the real {direction, body} objects, not a
+# re-parsed string) -- this template exists purely so the promptfoo UI
+# has something readable to show per case.
+prompts:
+  - |
+    {% for msg in conversation %}{{ msg.direction }}: {{ msg.body }}
+    {% endfor %}
+
+providers:
+  - id: file://classifierProvider.js
+    label: threadline-classifier
+
+defaultTest:
+  assert:
+    - type: javascript
+      metric: category
+      value: |
+        const parsed = JSON.parse(output);
+        const expected = context.vars.expectedCategory;
+        return {
+          pass: parsed.category === expected,
+          score: parsed.category === expected ? 1 : 0,
+          reason: `category: expected ${expected}, got ${parsed.category}`,
+        };
+    - type: javascript
+      metric: priority
+      value: |
+        const parsed = JSON.parse(output);
+        const expected = context.vars.expectedPriority;
+        return {
+          pass: parsed.priority === expected,
+          score: parsed.priority === expected ? 1 : 0,
+          reason: `priority: expected ${expected}, got ${parsed.priority}`,
+        };
+
+tests: file://eval-cases.yaml
