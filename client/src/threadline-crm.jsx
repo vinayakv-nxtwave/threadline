@@ -518,7 +518,13 @@ export default function ThreadlineCRM() {
       {/* Body */}
       {view === "analytics" ? (
         <div className="flex-1 min-h-0 overflow-y-auto">
-          <AnalyticsView onUnauthorized={handleLogout} />
+          <AnalyticsView
+            onUnauthorized={handleLogout}
+            onViewTicket={(id) => {
+              setSelectedId(id);
+              setView("tickets");
+            }}
+          />
         </div>
       ) : (
       <div className="flex flex-1 min-h-0 overflow-hidden">

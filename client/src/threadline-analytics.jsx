@@ -42,7 +42,7 @@ function KpiCard({ icon: Icon, label, value, sub, accent }) {
   );
 }
 
-export default function AnalyticsView({ onUnauthorized }) {
+export default function AnalyticsView({ onUnauthorized, onViewTicket }) {
   const [range, setRange] = useState("14d");
   const [data, setData] = useState(null);
   const [tickets, setTickets] = useState([]);
@@ -432,7 +432,15 @@ export default function AnalyticsView({ onUnauthorized }) {
               <tbody>
                 {filteredTickets.map((t) => (
                   <tr key={t.id} style={{ borderColor: C.line }} className="border-b last:border-0">
-                    <td className="py-2 mono">{t.ticket_no}</td>
+                    <td className="py-2 mono">
+                      <button
+                        onClick={() => onViewTicket(t.id)}
+                        className="underline hover:opacity-70 transition-opacity"
+                        style={{ color: C.ink }}
+                      >
+                        {t.ticket_no}
+                      </button>
+                    </td>
                     <td className="py-2" style={{ color: CATEGORY[t.category]?.color }}>
                       {CATEGORY[t.category]?.label || t.category}
                     </td>
