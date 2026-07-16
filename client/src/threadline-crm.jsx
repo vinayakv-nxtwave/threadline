@@ -863,6 +863,18 @@ export default function ThreadlineCRM() {
             <div className="flex items-center gap-2 text-xs" style={{ color: C.slate }}>
               <Calendar size={13} /> First contact {formatDate(selected.created_at)}
             </div>
+            {selected.previous_ticket_id && (
+              <div className="text-xs">
+                <span style={{ color: C.slateLight }}>Previous ticket: </span>
+                <button
+                  onClick={() => setSelectedId(selected.previous_ticket_id)}
+                  className="underline"
+                  style={{ color: C.ink }}
+                >
+                  view history
+                </button>
+              </div>
+            )}
             <div className="flex items-center gap-2 text-xs" style={{ color: C.slate }}>
               <Phone size={13} /> <span className="mono">{selected.student_phone}</span>
             </div>

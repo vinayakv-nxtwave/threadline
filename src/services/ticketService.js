@@ -53,14 +53,11 @@ export async function addMessage(
 }
 
 /**
- * The core rule: a ticket cannot sit closed or resolved once the student has
- * something new to say. If the student messages in on a resolved/closed
- * ticket, it snaps back open — treated as a new query. Category/priority
- * reclassification happens separately in handleIncomingMessage via the AI
- * classifier, which runs on every inbound message regardless of reopen. If
- * they message on a "pending" ticket (waiting on them), it's a continuation
- * of the same query, so it just moves to "open" (waiting on us again).
- * Returns true if the ticket was reopened from resolved/closed.
+ * No longer called from the webhook flow -- handleIncomingMessage now starts
+ * a fresh ticket instead of reopening a resolved/closed one (see
+ * previous_ticket_id). Kept as-is for the manual-reopen case, though
+ * PATCH /:id currently has its own separate inline logic rather than
+ * calling this directly.
  */
 export async function reopenIfNeeded(ticket) {
   if (ticket.status === "resolved" || ticket.status === "closed") {
@@ -115,8 +112,11 @@ export async function getTurnaroundTime(ticketId) {
 
 /**
  * Entry point called by the webhook route for every inbound student message.
- * Finds or creates the ticket for this phone number, reopens it if needed,
- * and logs the message.
+ * Finds the student's latest ticket; if it's resolved/closed, starts a
+ * fresh ticket instead of reopening it (linked via previous_ticket_id) so a
+ * new query never gets mixed into an old, finished conversation. Manual
+ * reopens (agent flips status back to open in the dashboard) are handled
+ * separately in PATCH /:id and are unaffected by this.
  */
 export async function handleIncomingMessage({
   phone,
@@ -131,15 +131,28 @@ export async function handleIncomingMessage({
 }) {
   const normalizedPhone = normalizePhone(phone);
   let ticket = await findLatestTicketByPhone(normalizedPhone);
-  let reopened = false;
+  let newTicketCreated = false;
 
   if (!ticket) {
     ticket = await createTicket({ phone: normalizedPhone, name });
-  } else {
-    reopened = await reopenIfNeeded(ticket);
-    if (!ticket.student_name && name) {
-      await pool.query(`UPDATE tickets SET student_name = $1 WHERE id = $2`, [name, ticket.id]);
-    }
+    newTicketCreated = true;
+  } else if (["resolved", "closed"].includes(ticket.status)) {
+    // The most recent ticket for this student is finished. Treat this as a
+    // genuinely new query rather than reopening old, resolved history.
+    const previousTicketId = ticket.id;
+    ticket = await createTicket({ phone: normalizedPhone, name });
+    await pool.query(`UPDATE tickets SET previous_ticket_id = $1 WHERE id = $2`, [previousTicketId, ticket.id]);
+    ticket.previous_ticket_id = previousTicketId;
+    newTicketCreated = true;
+  } else if (ticket.status === "pending") {
+    // Still the same open issue, just waiting on the student -- their reply
+    // moves it back to "open", no new ticket needed.
+    await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [ticket.id]);
+  }
+  // status "new" or "open": no change needed, just log the message below
+
+  if (!newTicketCreated && !ticket.student_name && name) {
+    await pool.query(`UPDATE tickets SET student_name = $1 WHERE id = $2`, [name, ticket.id]);
   }
 
   await addMessage(ticket.id, "inbound", {
@@ -167,7 +180,7 @@ export async function handleIncomingMessage({
     }
   }
 
-  return { ticket, reopened };
+  return { ticket, newTicketCreated };
 }
 
 /**

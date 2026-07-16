@@ -19,12 +19,14 @@ CREATE TABLE IF NOT EXISTS tickets (
   last_message_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at      TIMESTAMPTZ,
   last_reopened_at TIMESTAMPTZ,
-  manually_classified BOOLEAN NOT NULL DEFAULT false
+  manually_classified BOOLEAN NOT NULL DEFAULT false,
+  previous_ticket_id INTEGER REFERENCES tickets(id)
 );
 
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ;
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS last_reopened_at TIMESTAMPTZ;
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS manually_classified BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS previous_ticket_id INTEGER REFERENCES tickets(id);
 
 CREATE INDEX IF NOT EXISTS idx_tickets_phone  ON tickets (student_phone);
 CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets (status);
