@@ -8,11 +8,15 @@ const TOKEN = process.env.WHAPI_TOKEN;
  * Sends a plain text WhatsApp message via Whapi.Cloud.
  * @param {string} phone - Recipient number in international format, digits only (no "+").
  * @param {string} body - Message text.
+ * @param {string|null} quotedWhapiMessageId - whapi_message_id of a message to quote/reply to.
  */
-export async function sendText(phone, body) {
+export async function sendText(phone, body, quotedWhapiMessageId = null) {
   if (!TOKEN) {
     throw new Error("WHAPI_TOKEN is not set. Add it to your .env file.");
   }
+
+  const payload = { to: phone, body };
+  if (quotedWhapiMessageId) payload.quoted = quotedWhapiMessageId;
 
   const res = await fetch(`${WHAPI_BASE}/messages/text`, {
     method: "POST",
@@ -21,7 +25,7 @@ export async function sendText(phone, body) {
       "content-type": "application/json",
       authorization: `Bearer ${TOKEN}`,
     },
-    body: JSON.stringify({ to: phone, body }),
+    body: JSON.stringify(payload),
   });
 
   const data = await res.json().catch(() => ({}));
@@ -58,6 +62,35 @@ export async function sendMedia(phone, type, media, { caption, filename } = {}) 
 
   if (!res.ok) {
     throw new Error(`Whapi media send failed (${res.status}): ${JSON.stringify(data)}`);
+  }
+
+  return data;
+}
+
+/**
+ * Sets (or, with an empty emoji, clears) a reaction on a message via Whapi.Cloud.
+ * @param {string} whapiMessageId - The whapi message id to react to.
+ * @param {string} emoji - Reaction emoji; empty string/null clears the reaction.
+ */
+export async function sendReaction(whapiMessageId, emoji) {
+  if (!TOKEN) {
+    throw new Error("WHAPI_TOKEN is not set. Add it to your .env file.");
+  }
+
+  const res = await fetch(`${WHAPI_BASE}/messages/${whapiMessageId}/reaction`, {
+    method: "PUT",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json",
+      authorization: `Bearer ${TOKEN}`,
+    },
+    body: JSON.stringify({ emoji: emoji || "" }),
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(`Whapi reaction failed (${res.status}): ${JSON.stringify(data)}`);
   }
 
   return data;

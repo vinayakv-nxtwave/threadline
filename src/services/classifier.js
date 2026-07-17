@@ -97,3 +97,56 @@ export async function classifyTicket(messages) {
     return null; // fail closed — leave the ticket's existing category/priority untouched
   }
 }
+
+const ASK_AI_SYSTEM_PROMPT = `You help a support agent on the NxtWave Launchpad WhatsApp support line understand a ticket's conversation history. Answer clearly and concisely, based only on the conversation provided.`;
+
+/**
+ * Free-text Q&A over a ticket's conversation -- same Gemini setup as
+ * classifyTicket, but a plain-text response instead of the structured
+ * category/priority schema.
+ * @param {Array<{direction: 'inbound'|'outbound', body: string}>} messages
+ * @param {string} [question] - Defaults to summarizing the conversation.
+ * @returns {Promise<string|null>} null if the call failed
+ */
+export async function askAboutTicket(messages, question) {
+  if (!GEMINI_API_KEY) {
+    console.error("GEMINI_API_KEY is not set — skipping Ask AI.");
+    return null;
+  }
+
+  const conversationText = messages
+    .map((m) => `${m.direction === "inbound" ? "Student" : "Support agent"}: ${m.body || "[media message]"}`)
+    .join("\n");
+
+  const prompt = question?.trim()
+    ? `${conversationText}\n\nAgent's question: ${question.trim()}`
+    : `${conversationText}\n\nSummarize this support conversation in 2-3 sentences for an agent who hasn't read it yet.`;
+
+  try {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        systemInstruction: { parts: [{ text: ASK_AI_SYSTEM_PROMPT }] },
+        generationConfig: { temperature: 0.3 },
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      console.error(`Gemini ask-ai failed (${res.status}): ${errText}`);
+      return null;
+    }
+
+    const data = await res.json();
+    const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return answer?.trim() || null;
+  } catch (err) {
+    console.error("Ask AI error:", err.message);
+    return null;
+  }
+}

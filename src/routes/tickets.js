@@ -2,7 +2,8 @@ import { Router } from "express";
 import multer from "multer";
 import { pool } from "../db.js";
 import { addMessage, getTurnaroundTime } from "../services/ticketService.js";
-import { sendText, sendMedia } from "../services/whapiClient.js";
+import { sendText, sendMedia, sendReaction } from "../services/whapiClient.js";
+import { askAboutTicket } from "../services/classifier.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024 } });
@@ -95,7 +96,7 @@ router.get("/:id", async (req, res) => {
   const ticket = ticketRows[0];
 
   const { rows: messages } = await pool.query(
-    "SELECT * FROM messages WHERE ticket_id = $1 ORDER BY created_at ASC",
+    "SELECT * FROM messages WHERE ticket_id = $1 AND deleted_at IS NULL ORDER BY created_at ASC",
     [req.params.id]
   );
 
@@ -172,12 +173,22 @@ router.patch("/:id", async (req, res) => {
 
 // POST /api/tickets/:id/reply  -> agent reply (text or media), sent out over WhatsApp via Whapi
 router.post("/:id/reply", upload.single("file"), async (req, res) => {
-  const { body } = req.body;
+  const { body, quotedMessageId } = req.body;
   const file = req.file;
 
   const { rows } = await pool.query("SELECT * FROM tickets WHERE id = $1", [req.params.id]);
   const ticket = rows[0];
   if (!ticket) return res.status(404).json({ error: "not found" });
+
+  // Resolve the local quoted message id (if any) to the whapi id Whapi
+  // actually needs for the "quoted" send parameter.
+  let quotedWhapiMessageId = null;
+  if (quotedMessageId) {
+    const { rows: quotedRows } = await pool.query("SELECT whapi_message_id FROM messages WHERE id = $1", [
+      quotedMessageId,
+    ]);
+    quotedWhapiMessageId = quotedRows[0]?.whapi_message_id || null;
+  }
 
   try {
     if (file) {
@@ -205,14 +216,16 @@ router.post("/:id/reply", upload.single("file"), async (req, res) => {
         filename: file.originalname,
         caption: body || null,
         whapiMessageId: whapiRes?.message?.id || null,
+        quotedMessageId: quotedMessageId || null,
       });
     } else {
       if (!body || !body.trim()) return res.status(400).json({ error: "body is required" });
-      const whapiRes = await sendText(ticket.student_phone, body);
+      const whapiRes = await sendText(ticket.student_phone, body, quotedWhapiMessageId);
       await addMessage(ticket.id, "outbound", {
         messageType: "text",
         body,
         whapiMessageId: whapiRes?.message?.id || null,
+        quotedMessageId: quotedMessageId || null,
       });
     }
 
@@ -225,6 +238,101 @@ router.post("/:id/reply", upload.single("file"), async (req, res) => {
     console.error("Reply send error:", err);
     res.status(502).json({ error: "failed to send message via Whapi" });
   }
+});
+
+// POST /api/tickets/:id/messages/:messageId/react  -> agent sets/clears an emoji reaction
+router.post("/:id/messages/:messageId/react", async (req, res) => {
+  const { emoji } = req.body; // empty string / null removes the reaction
+  const { rows } = await pool.query("SELECT * FROM messages WHERE id = $1", [req.params.messageId]);
+  const message = rows[0];
+  if (!message?.whapi_message_id) return res.status(404).json({ error: "message not found" });
+
+  try {
+    await sendReaction(message.whapi_message_id, emoji);
+    await pool.query("UPDATE messages SET reaction = $1 WHERE id = $2", [emoji || null, message.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Reaction send error:", err);
+    res.status(502).json({ error: "failed to send reaction" });
+  }
+});
+
+// POST /api/tickets/:id/messages/:messageId/forward  -> re-send a message's content to a different ticket
+router.post("/:id/messages/:messageId/forward", async (req, res) => {
+  const { targetTicketId } = req.body;
+  const { rows: msgRows } = await pool.query("SELECT * FROM messages WHERE id = $1", [req.params.messageId]);
+  const { rows: targetRows } = await pool.query("SELECT * FROM tickets WHERE id = $1", [targetTicketId]);
+  const message = msgRows[0];
+  const targetTicket = targetRows[0];
+  if (!message || !targetTicket) return res.status(404).json({ error: "not found" });
+
+  try {
+    if (message.message_type === "text" || !message.media_url) {
+      const whapiRes = await sendText(targetTicket.student_phone, message.body || "[forwarded message]");
+      await addMessage(targetTicket.id, "outbound", {
+        messageType: "text",
+        body: message.body || "[forwarded message]",
+        whapiMessageId: whapiRes?.message?.id || null,
+      });
+    } else {
+      const whapiRes = await sendMedia(targetTicket.student_phone, message.message_type, message.media_url, {
+        caption: message.caption,
+        filename: message.filename,
+      });
+      await addMessage(targetTicket.id, "outbound", {
+        messageType: message.message_type,
+        body: message.body,
+        mediaUrl: message.media_url,
+        mimeType: message.mime_type,
+        filename: message.filename,
+        caption: message.caption,
+        whapiMessageId: whapiRes?.message?.id || null,
+      });
+    }
+
+    if (targetTicket.status === "new") {
+      await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [targetTicket.id]);
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Forward send error:", err);
+    res.status(502).json({ error: "failed to forward message via Whapi" });
+  }
+});
+
+// PATCH /api/tickets/:id/messages/:messageId/pin  -> internal-only, no Whapi call
+router.patch("/:id/messages/:messageId/pin", async (req, res) => {
+  const { pinned } = req.body;
+  await pool.query("UPDATE messages SET pinned = $1 WHERE id = $2", [!!pinned, req.params.messageId]);
+  res.json({ ok: true });
+});
+
+// PATCH /api/tickets/:id/messages/:messageId/star  -> internal-only, no Whapi call
+router.patch("/:id/messages/:messageId/star", async (req, res) => {
+  const { starred } = req.body;
+  await pool.query("UPDATE messages SET starred = $1 WHERE id = $2", [!!starred, req.params.messageId]);
+  res.json({ ok: true });
+});
+
+// DELETE /api/tickets/:id/messages/:messageId  -> soft delete: hidden from the UI, row kept permanently
+router.delete("/:id/messages/:messageId", async (req, res) => {
+  await pool.query("UPDATE messages SET deleted_at = now() WHERE id = $1", [req.params.messageId]);
+  res.json({ ok: true });
+});
+
+// POST /api/tickets/:id/ask-ai  -> summarize the ticket, or answer a specific question, via Gemini
+router.post("/:id/ask-ai", async (req, res) => {
+  const { question } = req.body; // optional; defaults to "summarize this ticket"
+  const { rows: messages } = await pool.query(
+    "SELECT direction, body FROM messages WHERE ticket_id = $1 AND deleted_at IS NULL ORDER BY created_at ASC",
+    [req.params.id]
+  );
+
+  const answer = await askAboutTicket(messages, question);
+  if (!answer) return res.status(502).json({ error: "Ask AI failed -- check GEMINI_API_KEY and try again" });
+
+  res.json({ answer });
 });
 
 export default router;

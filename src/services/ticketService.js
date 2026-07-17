@@ -42,14 +42,38 @@ export async function addMessage(
     filename = null,
     caption = null,
     whapiMessageId = null,
+    quotedMessageId = null,
   }
 ) {
-  await pool.query(
-    `INSERT INTO messages (ticket_id, direction, message_type, body, media_url, mime_type, filename, caption, whapi_message_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [ticketId, direction, messageType, body, mediaUrl, mimeType, filename, caption, whapiMessageId]
+  const { rows } = await pool.query(
+    `INSERT INTO messages (ticket_id, direction, message_type, body, media_url, mime_type, filename, caption, whapi_message_id, quoted_message_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING *`,
+    [ticketId, direction, messageType, body, mediaUrl, mimeType, filename, caption, whapiMessageId, quotedMessageId]
   );
   await pool.query(`UPDATE tickets SET last_message_at = now() WHERE id = $1`, [ticketId]);
+  return rows[0];
+}
+
+/**
+ * Looks up a message's local row by its whapi_message_id -- used to resolve
+ * quoted-reply references and incoming reactions back to a local message id.
+ */
+export async function findMessageByWhapiId(whapiMessageId) {
+  if (!whapiMessageId) return null;
+  const { rows } = await pool.query(`SELECT * FROM messages WHERE whapi_message_id = $1 LIMIT 1`, [whapiMessageId]);
+  return rows[0] || null;
+}
+
+/**
+ * Applies an incoming reaction (from the student's WhatsApp app) to the
+ * local message it targets, looked up by whapi_message_id.
+ */
+export async function applyIncomingReaction(targetWhapiMessageId, emoji) {
+  await pool.query(`UPDATE messages SET reaction = $1 WHERE whapi_message_id = $2`, [
+    emoji || null,
+    targetWhapiMessageId,
+  ]);
 }
 
 /**
@@ -128,6 +152,7 @@ export async function handleIncomingMessage({
   filename,
   caption,
   whapiMessageId,
+  quotedMessageId,
 }) {
   const normalizedPhone = normalizePhone(phone);
   let ticket = await findLatestTicketByPhone(normalizedPhone);
@@ -163,6 +188,7 @@ export async function handleIncomingMessage({
     filename,
     caption,
     whapiMessageId,
+    quotedMessageId,
   });
 
   if (!ticket.manually_classified) {

@@ -2,10 +2,11 @@ import { useState, useRef, useEffect } from "react";
 import {
   Search, Lock, Unlock, CheckCircle2, Clock, AlertTriangle, Send,
   Phone, Calendar, ChevronDown, X, Circle, MessageCircle, Tag as TagIcon, LogOut,
-  Smile, Paperclip, Mic,
+  Smile, Paperclip, Mic, Pin, Star, Reply as ReplyIcon,
 } from "lucide-react";
 import EmojiPicker from "emoji-picker-react";
 import AnalyticsView from "./threadline-analytics.jsx";
+import MessageMenu from "./threadline-message-menu.jsx";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 const POLL_MS = 4000;
@@ -100,12 +101,13 @@ export async function api(path, options = {}) {
 
 // Multipart upload for media replies — can't reuse api() since it always sets
 // content-type: application/json, which breaks FormData's auto boundary header.
-async function sendFileReply(ticketId, file, caption, isVoiceNote) {
+async function sendFileReply(ticketId, file, caption, isVoiceNote, quotedMessageId) {
   const token = localStorage.getItem(TOKEN_KEY);
   const form = new FormData();
   form.append("file", file);
   if (caption) form.append("body", caption);
   if (isVoiceNote) form.append("isVoiceNote", "true");
+  if (quotedMessageId) form.append("quotedMessageId", quotedMessageId);
 
   const headers = {};
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -148,6 +150,7 @@ export default function ThreadlineCRM() {
   const [toast, setToast] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [replyingTo, setReplyingTo] = useState(null);
   const threadEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -245,6 +248,7 @@ export default function ThreadlineCRM() {
 
   useEffect(() => {
     setNotesDraft(selectedDetail?.notes || "");
+    setReplyingTo(null);
   }, [selectedDetail?.id]);
 
   useEffect(() => {
@@ -278,9 +282,10 @@ export default function ThreadlineCRM() {
     try {
       await api(`/api/tickets/${selectedDetail.id}/reply`, {
         method: "POST",
-        body: JSON.stringify({ body: draft.trim() }),
+        body: JSON.stringify({ body: draft.trim(), quotedMessageId: replyingTo?.id }),
       });
       setDraft("");
+      setReplyingTo(null);
       await fetchDetail(selectedDetail.id);
       await fetchTickets();
     } catch (err) {
@@ -298,8 +303,9 @@ export default function ThreadlineCRM() {
 
     setSending(true);
     try {
-      await sendFileReply(selectedDetail.id, file, draft.trim() || undefined, false);
+      await sendFileReply(selectedDetail.id, file, draft.trim() || undefined, false, replyingTo?.id);
       setDraft("");
+      setReplyingTo(null);
       await fetchDetail(selectedDetail.id);
       await fetchTickets();
     } catch (err) {
@@ -697,72 +703,153 @@ export default function ThreadlineCRM() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4 space-y-3">
-              {(selected.messages || []).map((m) => {
-                const fromAgent = m.direction === "outbound";
-                const type = m.message_type || "text";
-                return (
-                  <div key={m.id} className={`flex ${fromAgent ? "justify-end" : "justify-start"}`}>
+            {(() => {
+              const allMessages = selected.messages || [];
+              const messagesById = Object.fromEntries(allMessages.map((m) => [m.id, m]));
+              const pinnedMessages = allMessages.filter((m) => m.pinned);
+
+              return (
+                <>
+                  {pinnedMessages.length > 0 && (
                     <div
-                      style={{
-                        background: fromAgent ? C.green : C.card,
-                        color: fromAgent ? "#fff" : C.ink,
-                        border: fromAgent ? "none" : `1px solid ${C.line}`,
-                      }}
-                      className="max-w-[70%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed shadow-sm"
+                      style={{ borderBottom: `1px solid ${C.line}`, background: C.paperDim }}
+                      className="px-5 py-2 flex items-center gap-2 overflow-x-auto"
                     >
-                      {type === "text" && m.body}
-
-                      {(type === "image" || type === "sticker") &&
-                        (m.media_url ? (
-                          <img src={m.media_url} alt="" className="rounded-lg max-w-[240px]" />
-                        ) : (
-                          <div className="text-xs italic opacity-80">📷 Sent: {m.filename || type}</div>
-                        ))}
-
-                      {type === "video" &&
-                        (m.media_url ? (
-                          <video controls src={m.media_url} className="rounded-lg max-w-[240px]" />
-                        ) : (
-                          <div className="text-xs italic opacity-80">🎞️ Sent: {m.filename || "video"}</div>
-                        ))}
-
-                      {(type === "audio" || type === "voice") &&
-                        (m.media_url ? (
-                          <audio controls src={m.media_url} />
-                        ) : (
-                          <div className="text-xs italic opacity-80">🎤 Sent: {m.filename || "voice note"}</div>
-                        ))}
-
-                      {type === "document" &&
-                        (m.media_url ? (
-                          <a
-                            href={m.media_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="underline text-sm"
-                            style={{ color: fromAgent ? "#fff" : C.ink }}
-                          >
-                            📄 {m.filename || "Document"}
-                          </a>
-                        ) : (
-                          <div className="text-xs italic opacity-80">📄 Sent: {m.filename || "document"}</div>
-                        ))}
-
-                      {type !== "text" && m.caption && <div className="text-xs mt-1">{m.caption}</div>}
-
-                      <div
-                        style={{ color: fromAgent ? "rgba(255,255,255,0.75)" : C.slateLight }}
-                        className="text-[10px] mt-1 mono"
-                      >
-                        {timeAgo(new Date(m.created_at).getTime())}
-                      </div>
+                      <Pin size={12} color={C.slateLight} className="flex-shrink-0" />
+                      {pinnedMessages.map((pm) => (
+                        <button
+                          key={pm.id}
+                          onClick={() =>
+                            document.getElementById(`msg-${pm.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+                          }
+                          style={{ background: C.card, border: `1px solid ${C.line}`, color: C.slate }}
+                          className="text-[11px] px-2 py-1 rounded-full flex-shrink-0 max-w-[200px] truncate"
+                        >
+                          {(pm.body || pm.caption || "Media message").slice(0, 40)}
+                        </button>
+                      ))}
                     </div>
+                  )}
+
+                  <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4 space-y-3">
+                    {allMessages.map((m) => {
+                      const fromAgent = m.direction === "outbound";
+                      const type = m.message_type || "text";
+                      const quoted = m.quoted_message_id ? messagesById[m.quoted_message_id] : null;
+                      return (
+                        <div
+                          key={m.id}
+                          id={`msg-${m.id}`}
+                          className={`flex group ${fromAgent ? "justify-end" : "justify-start"}`}
+                        >
+                          <div
+                            style={{
+                              background: fromAgent ? C.green : C.card,
+                              color: fromAgent ? "#fff" : C.ink,
+                              border: fromAgent ? "none" : `1px solid ${C.line}`,
+                            }}
+                            className="max-w-[70%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed shadow-sm"
+                          >
+                            <div className="flex items-start gap-2">
+                              <div className="min-w-0 flex-1">
+                                {m.quoted_message_id && (
+                                  <div
+                                    className="text-xs px-2 py-1 mb-1 rounded border-l-2 opacity-70"
+                                    style={{
+                                      borderColor: fromAgent ? "rgba(255,255,255,0.6)" : C.green,
+                                      background: fromAgent ? "rgba(255,255,255,0.12)" : C.paperDim,
+                                      color: fromAgent ? "#fff" : C.slate,
+                                    }}
+                                  >
+                                    {(quoted?.body || quoted?.caption || "Original message").slice(0, 60)}
+                                  </div>
+                                )}
+
+                                {type === "text" && m.body}
+
+                                {(type === "image" || type === "sticker") &&
+                                  (m.media_url ? (
+                                    <img src={m.media_url} alt="" className="rounded-lg max-w-[240px]" />
+                                  ) : (
+                                    <div className="text-xs italic opacity-80">📷 Sent: {m.filename || type}</div>
+                                  ))}
+
+                                {type === "video" &&
+                                  (m.media_url ? (
+                                    <video controls src={m.media_url} className="rounded-lg max-w-[240px]" />
+                                  ) : (
+                                    <div className="text-xs italic opacity-80">🎞️ Sent: {m.filename || "video"}</div>
+                                  ))}
+
+                                {(type === "audio" || type === "voice") &&
+                                  (m.media_url ? (
+                                    <audio controls src={m.media_url} />
+                                  ) : (
+                                    <div className="text-xs italic opacity-80">🎤 Sent: {m.filename || "voice note"}</div>
+                                  ))}
+
+                                {type === "document" &&
+                                  (m.media_url ? (
+                                    <a
+                                      href={m.media_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="underline text-sm"
+                                      style={{ color: fromAgent ? "#fff" : C.ink }}
+                                    >
+                                      📄 {m.filename || "Document"}
+                                    </a>
+                                  ) : (
+                                    <div className="text-xs italic opacity-80">📄 Sent: {m.filename || "document"}</div>
+                                  ))}
+
+                                {type !== "text" && m.caption && <div className="text-xs mt-1">{m.caption}</div>}
+                              </div>
+
+                              <MessageMenu
+                                message={m}
+                                ticketId={selected.id}
+                                tickets={tickets}
+                                C={C}
+                                onReply={setReplyingTo}
+                                onChanged={() => fetchDetail(selected.id)}
+                              />
+                            </div>
+
+                            {m.reaction && <div className="text-sm mt-1">{m.reaction}</div>}
+
+                            <div
+                              style={{ color: fromAgent ? "rgba(255,255,255,0.75)" : C.slateLight }}
+                              className="flex items-center gap-1 text-[10px] mt-1 mono"
+                            >
+                              {m.pinned && <Pin size={9} />}
+                              {m.starred && <Star size={9} fill="currentColor" />}
+                              {timeAgo(new Date(m.created_at).getTime())}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div ref={threadEndRef} />
                   </div>
-                );
-              })}
-              <div ref={threadEndRef} />
-            </div>
+                </>
+              );
+            })()}
+
+            {replyingTo && (
+              <div
+                style={{ borderTop: `1px solid ${C.line}`, background: C.paperDim }}
+                className="px-4 py-2 flex items-center justify-between gap-2"
+              >
+                <div className="flex items-center gap-2 min-w-0 text-xs" style={{ color: C.slate }}>
+                  <ReplyIcon size={12} className="flex-shrink-0" />
+                  <span className="truncate">{replyingTo.body || replyingTo.caption || "Original message"}</span>
+                </div>
+                <button onClick={() => setReplyingTo(null)} className="flex-shrink-0">
+                  <X size={13} color={C.slateLight} />
+                </button>
+              </div>
+            )}
 
             <div
               style={{ borderTop: `1px solid ${C.line}`, background: C.card }}

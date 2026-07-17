@@ -1,5 +1,11 @@
 import { Router } from "express";
-import { handleIncomingMessage, logAgentMessageFromPhone, normalizePhone } from "../services/ticketService.js";
+import {
+  handleIncomingMessage,
+  logAgentMessageFromPhone,
+  normalizePhone,
+  findMessageByWhapiId,
+  applyIncomingReaction,
+} from "../services/ticketService.js";
 
 const router = Router();
 
@@ -17,8 +23,19 @@ router.post("/whapi", async (req, res) => {
 
   try {
     for (const msg of messages) {
-      if (!SUPPORTED_TYPES.includes(msg.type)) continue;
       if (!msg.chat_id || msg.chat_id.endsWith("@g.us")) continue; // skip groups
+
+      // Reactions arrive as their own message shape (type: "action", with an
+      // action.type of "reaction") rather than as an extension of the normal
+      // text/media messages -- a genuinely separate path from everything else
+      // in this loop, so it's handled and continue'd before the type filter
+      // below (which would otherwise skip "action" messages entirely).
+      if (msg.type === "action" && msg.action?.type === "reaction") {
+        await applyIncomingReaction(msg.action.target, msg.action.emoji);
+        continue;
+      }
+
+      if (!SUPPORTED_TYPES.includes(msg.type)) continue;
 
       // Whapi's `from` is always the channel's own number when from_me is
       // true, so chat_id (the customer's number either way) is the only
@@ -55,6 +72,15 @@ router.post("/whapi", async (req, res) => {
           whapiMessageId: msg.id,
         });
       } else {
+        // If the student replied by quoting a specific earlier message,
+        // resolve that back to our local message id so the CRM can render
+        // the quote (msg.context.quoted_id is the whapi id of the original).
+        let quotedMessageId = null;
+        if (msg.context?.quoted_id) {
+          const quoted = await findMessageByWhapiId(msg.context.quoted_id);
+          quotedMessageId = quoted?.id || null;
+        }
+
         await handleIncomingMessage({
           phone: customerPhone,
           name: msg.from_name,
@@ -65,6 +91,7 @@ router.post("/whapi", async (req, res) => {
           filename,
           caption,
           whapiMessageId: msg.id,
+          quotedMessageId,
         });
       }
     }

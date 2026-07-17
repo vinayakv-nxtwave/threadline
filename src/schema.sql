@@ -43,7 +43,13 @@ CREATE TABLE IF NOT EXISTS messages (
   filename          TEXT,
   caption           TEXT,
   whapi_message_id  TEXT,
-  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  pinned            BOOLEAN NOT NULL DEFAULT false,
+  starred           BOOLEAN NOT NULL DEFAULT false,
+  deleted_at        TIMESTAMPTZ,
+  reaction          TEXT,
+  quoted_message_id INTEGER REFERENCES messages(id),
+  delivery_status   TEXT DEFAULT 'sent'
 );
 
 -- Migration for pre-existing tables (safe to re-run: only adds what's missing)
@@ -56,6 +62,12 @@ ALTER TABLE messages ALTER COLUMN body DROP NOT NULL;
 ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_message_type_check;
 ALTER TABLE messages ADD CONSTRAINT messages_message_type_check
   CHECK (message_type IN ('text', 'image', 'video', 'document', 'audio', 'voice', 'sticker'));
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS starred BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS reaction TEXT;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS quoted_message_id INTEGER REFERENCES messages(id);
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS delivery_status TEXT DEFAULT 'sent';
 
 CREATE INDEX IF NOT EXISTS idx_messages_ticket ON messages (ticket_id);
 
