@@ -118,9 +118,13 @@ export async function askAboutTicket(messages, question) {
     .map((m) => `${m.direction === "inbound" ? "Student" : "Support agent"}: ${m.body || "[media message]"}`)
     .join("\n");
 
+  // The explicit "Conversation:" label matters more than it looks -- without
+  // it, Gemini sometimes reads a short (e.g. single-message) transcript as a
+  // preamble rather than the actual conversation, and asks the agent to
+  // paste in history that's already right there. Confirmed via direct testing.
   const prompt = question?.trim()
-    ? `${conversationText}\n\nAgent's question: ${question.trim()}`
-    : `${conversationText}\n\nSummarize this support conversation in 2-3 sentences for an agent who hasn't read it yet.`;
+    ? `Conversation:\n${conversationText}\n\nAgent's question: ${question.trim()}`
+    : `Conversation:\n${conversationText}\n\nSummarize this support conversation in 2-3 sentences for an agent who hasn't read it yet.`;
 
   try {
     const res = await fetch(API_URL, {
