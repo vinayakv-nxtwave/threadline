@@ -23,17 +23,20 @@ const COLUMNS = [
   { key: "afterHours", label: "Received after-hours" },
 ];
 
+// Colors are stored by name and resolved at render time: this module is
+// imported by threadline-crm.jsx, so C isn't initialized yet while this
+// top-level code runs (reading C here crashed the whole app on load).
 const RESPONSE_STATUS = {
-  met: { label: "Within TAT", color: C.greenDark },
-  late: { label: "Breached (late)", color: C.coral },
-  overdue: { label: "Breached (no reply)", color: C.coral },
-  pending: { label: "Due soon", color: C.amber },
+  met: { label: "Within TAT", tone: "greenDark" },
+  late: { label: "Breached (late)", tone: "coral" },
+  overdue: { label: "Breached (no reply)", tone: "coral" },
+  pending: { label: "Due soon", tone: "amber" },
 };
 const RESOLUTION_STATUS = {
-  met: { label: "Within TAT", color: C.greenDark },
-  late: { label: "Breached (late)", color: C.coral },
-  overdue: { label: "Breached (unresolved)", color: C.coral },
-  pending: { label: "In progress", color: C.amber },
+  met: { label: "Within TAT", tone: "greenDark" },
+  late: { label: "Breached (late)", tone: "coral" },
+  overdue: { label: "Breached (unresolved)", tone: "coral" },
+  pending: { label: "In progress", tone: "amber" },
 };
 
 const IST = { timeZone: "Asia/Kolkata" };
@@ -202,7 +205,7 @@ export default function TatReportView({ onUnauthorized, onViewTicket }) {
   }, [period, from, to, reloadKey]);
 
   if (error) {
-    return <div className="p-6 text-sm" style={{ color: C.coral }}>Couldn't load TAT report: {error}</div>;
+    return <div className="p-6 text-sm" style={{ tone: "coral" }}>Couldn't load TAT report: {error}</div>;
   }
   if (!data) {
     return <div className="p-6 text-sm" style={{ color: C.slateLight }}>Loading TAT report…</div>;
@@ -570,12 +573,12 @@ export default function TatReportView({ onUnauthorized, onViewTicket }) {
                       </td>
                       <td className="py-2 pr-3 mono whitespace-nowrap">{formatIst(t.tat.responseDueAt)}</td>
                       <td className="py-2 pr-3 mono whitespace-nowrap">{formatIst(t.tat.firstResponseAt)}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap" style={{ color: rs.color }}>
+                      <td className="py-2 pr-3 whitespace-nowrap" style={{ color: C[rs.tone] }}>
                         {rs.label} <span className="mono" style={{ color: C.slateLight }}>{formatWorking(t.tat.responseWorkingMinutes)}</span>
                       </td>
                       <td className="py-2 pr-3 mono whitespace-nowrap">{formatIst(t.tat.resolutionDueAt)}</td>
                       <td className="py-2 pr-3 mono whitespace-nowrap">{formatIst(t.tat.resolvedAt)}</td>
-                      <td className="py-2 pr-3 whitespace-nowrap" style={{ color: ss.color }}>
+                      <td className="py-2 pr-3 whitespace-nowrap" style={{ color: C[ss.tone] }}>
                         {ss.label} <span className="mono" style={{ color: C.slateLight }}>{formatWorking(t.tat.resolutionWorkingMinutes)}</span>
                       </td>
                     </tr>
