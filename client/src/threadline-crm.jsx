@@ -7,8 +7,10 @@ import {
 import EmojiPicker from "emoji-picker-react";
 import AnalyticsView from "./threadline-analytics.jsx";
 import MessageMenu from "./threadline-message-menu.jsx";
+import BetaBanner from "./threadline-beta.jsx";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+export const IS_BETA = import.meta.env.VITE_APP_ENV === "beta";
 const POLL_MS = 4000;
 export const TOKEN_KEY = "threadline_token";
 
@@ -416,6 +418,11 @@ export default function ThreadlineCRM() {
               <MessageCircle size={17} color="#fff" strokeWidth={2.2} />
             </div>
             <span className="display text-lg font-semibold tracking-tight">Threadline</span>
+            {IS_BETA && (
+              <span style={{ background: C.amber, color: C.ink }} className="text-[10px] font-semibold px-1.5 py-0.5 rounded">
+                BETA
+              </span>
+            )}
           </div>
           <div>
             <label className="text-xs font-medium" style={{ color: C.slate }}>
@@ -461,6 +468,16 @@ export default function ThreadlineCRM() {
         .scrollbar-thin::-webkit-scrollbar-thumb { background: ${C.line}; border-radius: 4px; }
         .ticket-row:hover { background: ${C.paperDim}; }
       `}</style>
+
+      {IS_BETA && (
+        <BetaBanner
+          onSimulated={(res) => {
+            showToast(`Simulated message → ${res.ticketNo}${res.newTicketCreated ? " (new ticket)" : ""}`);
+            fetchTickets();
+          }}
+          onError={(err) => (err.unauthorized ? handleLogout() : showToast(err.message))}
+        />
+      )}
 
       {/* Header */}
       <div
