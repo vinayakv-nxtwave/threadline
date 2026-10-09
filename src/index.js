@@ -7,6 +7,7 @@ import ticketsRouter from "./routes/tickets.js";
 import authRouter from "./routes/auth.js";
 import analyticsRouter from "./routes/analytics.js";
 import devRouter from "./routes/dev.js";
+import holidaysRouter from "./routes/holidays.js";
 import { requireAuth } from "./middleware/auth.js";
 import { APP_ENV, IS_BETA } from "./env.js";
 
@@ -20,6 +21,7 @@ app.use("/webhook", webhookRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/tickets", requireAuth, ticketsRouter);
 app.use("/api/analytics", requireAuth, analyticsRouter);
+app.use("/api/holidays", requireAuth, holidaysRouter);
 if (IS_BETA) app.use("/api/dev", requireAuth, devRouter);
 
 app.get("/health", (req, res) => res.json({ ok: true, env: APP_ENV }));

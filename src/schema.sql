@@ -83,3 +83,14 @@ DROP TRIGGER IF EXISTS trg_tickets_updated_at ON tickets;
 CREATE TRIGGER trg_tickets_updated_at
   BEFORE UPDATE ON tickets
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- Holidays for TAT working-hours calculations (see docs/TAT.md). Dates are
+-- IST calendar dates. Sundays are already non-working and needn't be listed.
+CREATE TABLE IF NOT EXISTS holidays (
+  holiday_date DATE PRIMARY KEY,
+  name         TEXT NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Speeds up "first agent reply after the ticket was created" lookups used by TAT reports
+CREATE INDEX IF NOT EXISTS idx_messages_ticket_dir_created ON messages (ticket_id, direction, created_at);

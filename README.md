@@ -81,6 +81,8 @@ Once deployed for real, swap the ngrok URL for your production domain.
 | PATCH  | `/api/tickets/:id`        | Update `status`, `category`, `priority`, `assignee`, `notes`, `tags` |
 | POST   | `/api/tickets/:id/reply`  | `{ "body": "..." }` — sends a WhatsApp reply via Whapi and logs it |
 | POST   | `/api/auth/login`         | `{ "password": "..." }` — returns `{ "token": "..." }` on success |
+| GET    | `/api/analytics/tat`      | TAT report. `?period=day|week|month&from=YYYY-MM-DD&to=YYYY-MM-DD` (IST dates) — see `docs/TAT.md` |
+| GET/POST/DELETE | `/api/holidays`  | List / add `{ date, name }` / remove `/:date` holidays used by TAT |
 
 All `/api/tickets` routes require `Authorization: Bearer <token>`, obtained by
 logging in with `DASHBOARD_PASSWORD`. Tokens are stateless (HMAC-signed, no
@@ -143,6 +145,10 @@ ticket's detail every few seconds, so new inbound messages show up without a
 manual refresh.
 
 ## 9. Deploying
+
+**Changes go to beta first, then production** — see `docs/ENVIRONMENTS.md`
+for the beta setup and release flow. TAT rules and test cases: `docs/TAT.md`
+(`npm test` runs them).
 
 `render.yaml` in the repo root configures two Render services: the backend
 (`npm install` / `npm start`) and the dashboard as a static site (built from

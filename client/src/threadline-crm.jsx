@@ -8,6 +8,7 @@ import EmojiPicker from "emoji-picker-react";
 import AnalyticsView from "./threadline-analytics.jsx";
 import MessageMenu from "./threadline-message-menu.jsx";
 import BetaBanner from "./threadline-beta.jsx";
+import TatReportView from "./threadline-tat.jsx";
 
 export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 export const IS_BETA = import.meta.env.VITE_APP_ENV === "beta";
@@ -83,6 +84,24 @@ export function formatDuration(seconds) {
   return `${Math.round(seconds / 86400)}d`;
 }
 
+export function isAfterHoursWaiting(t) {
+  return !!t.tat?.afterHours && ["pending", "overdue"].includes(t.tat.responseStatus);
+}
+
+// "Today 13:00" / "Tue 13:00" / "12 Oct 13:00" in IST
+export function formatDue(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const tz = { timeZone: "Asia/Kolkata" };
+  const time = d.toLocaleTimeString("en-GB", { ...tz, hour: "2-digit", minute: "2-digit" });
+  const dayKey = (x) => x.toLocaleDateString("en-CA", tz);
+  if (dayKey(d) === dayKey(new Date())) return `Today ${time}`;
+  if (Math.abs(d - Date.now()) < 6 * 86400000) {
+    return `${d.toLocaleDateString("en-GB", { ...tz, weekday: "short" })} ${time}`;
+  }
+  return `${d.toLocaleDateString("en-GB", { ...tz, day: "numeric", month: "short" })} ${time}`;
+}
+
 export async function api(path, options = {}) {
   const token = localStorage.getItem(TOKEN_KEY);
   const headers = { "content-type": "application/json", ...(options.headers || {}) };
@@ -132,7 +151,7 @@ async function sendFileReply(ticketId, file, caption, isVoiceNote, quotedMessage
 }
 
 export default function ThreadlineCRM() {
-  const [view, setView] = useState("tickets"); // "tickets" | "analytics"
+  const [view, setView] = useState("tickets"); // "tickets" | "analytics" | "tat"
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -377,7 +396,19 @@ export default function ThreadlineCRM() {
         : ((t.student_name || "") + t.student_phone + t.ticket_no)
             .toLowerCase()
             .includes(search.toLowerCase())
-    );
+    )
+    // After-hours queries still waiting on a first reply float to the top
+    // (oldest first) so they're the first thing handled next working day.
+    // Everything else keeps the server's most-recent-message order.
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => {
+      const pa = isAfterHoursWaiting(a.t);
+      const pb = isAfterHoursWaiting(b.t);
+      if (pa !== pb) return pa ? -1 : 1;
+      if (pa) return new Date(a.t.created_at) - new Date(b.t.created_at);
+      return a.i - b.i;
+    })
+    .map(({ t }) => t);
 
   const counts = tickets.reduce((acc, t) => {
     acc[t.status] = (acc[t.status] || 0) + 1;
@@ -503,6 +534,7 @@ export default function ThreadlineCRM() {
             {[
               { key: "tickets", label: "Tickets" },
               { key: "analytics", label: "Analytics" },
+              { key: "tat", label: "TAT Reports" },
             ].map((v) => (
               <button
                 key={v.key}
@@ -539,7 +571,17 @@ export default function ThreadlineCRM() {
       </div>
 
       {/* Body */}
-      {view === "analytics" ? (
+      {view === "tat" ? (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <TatReportView
+            onUnauthorized={handleLogout}
+            onViewTicket={(id) => {
+              setSelectedId(id);
+              setView("tickets");
+            }}
+          />
+        </div>
+      ) : view === "analytics" ? (
         <div className="flex-1 min-h-0 overflow-y-auto">
           <AnalyticsView
             onUnauthorized={handleLogout}
@@ -668,6 +710,26 @@ export default function ThreadlineCRM() {
                         {t.ticket_no}
                       </span>
                     </div>
+                    {t.tat && ["pending", "overdue"].includes(t.tat.responseStatus) && (
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        {t.tat.afterHours && (
+                          <span
+                            style={{ background: C.ink, color: "#fff" }}
+                            className="text-[10px] font-medium px-1.5 py-0.5 rounded flex items-center gap-1"
+                            title="Received outside working hours (10:00–18:00 Mon–Sat, excl. holidays)"
+                          >
+                            <Clock size={9} /> After-hours · priority
+                          </span>
+                        )}
+                        <span
+                          className="text-[10px] font-medium"
+                          style={{ color: t.tat.responseStatus === "overdue" ? C.coral : C.amber }}
+                        >
+                          {t.tat.responseStatus === "overdue" ? "Response TAT breached · was due " : "Reply by "}
+                          {formatDue(t.tat.responseDueAt)}
+                        </span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                       <span
                         style={{ color: PRIORITY[t.priority]?.color }}

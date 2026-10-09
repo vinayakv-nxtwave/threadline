@@ -1,5 +1,14 @@
 import { Router } from "express";
 import { pool } from "../db.js";
+import { loadHolidays } from "../services/holidays.js";
+import {
+  TAT_CONFIG,
+  PERIODS,
+  buildTatReport,
+  bucketKeyForDate,
+  localDateKey,
+  localMidnightUtc,
+} from "../services/tat.js";
 
 const router = Router();
 
@@ -125,6 +134,86 @@ router.get("/summary", async (req, res) => {
       resolutionRate: r.handled > 0 ? Math.round((r.resolved_count / r.handled) * 100) : null,
       avgResolutionSeconds: r.avg_resolution_seconds ? Math.round(r.avg_resolution_seconds) : null,
     })),
+  });
+});
+
+// Default look-back per period when no from/to is given.
+const DEFAULT_SPAN = { day: 14, week: 8 * 7, month: 183 };
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// GET /api/analytics/tat?period=day|week|month&from=YYYY-MM-DD&to=YYYY-MM-DD
+// Dates are IST calendar dates, inclusive. Rules: docs/TAT.md.
+router.get("/tat", async (req, res) => {
+  const period = PERIODS.includes(req.query.period) ? req.query.period : "day";
+  const now = new Date();
+  const todayKey = localDateKey(now);
+  const toKey = DATE_RE.test(req.query.to || "") ? req.query.to : todayKey;
+  let fromKey = DATE_RE.test(req.query.from || "") ? req.query.from : null;
+  if (!fromKey) {
+    const span = DEFAULT_SPAN[period];
+    fromKey = new Date(Date.parse(`${toKey}T00:00:00Z`) - (span - 1) * 86400000).toISOString().slice(0, 10);
+    if (period === "week") fromKey = bucketKeyForDate(fromKey, "week");
+    if (period === "month") fromKey = `${fromKey.slice(0, 7)}-01`;
+  }
+  if (fromKey > toKey) return res.status(400).json({ error: "from must be on or before to" });
+  if (Date.parse(toKey) - Date.parse(fromKey) > 400 * 86400000) {
+    return res.status(400).json({ error: "range too large (max ~13 months)" });
+  }
+
+  const holidays = await loadHolidays();
+  if (holidays.missingTable) {
+    return res.status(500).json({ error: "holidays table missing -- run src/schema.sql on this database" });
+  }
+
+  const fromUtc = localMidnightUtc(fromKey);
+  const toUtcExclusive = new Date(localMidnightUtc(toKey).getTime() + 86400000);
+
+  // Everything received in the range, plus older queries that were still
+  // unanswered when the range began (they count toward the daily backlog).
+  // "Response" = the first agent message at/after the query arrived, whether
+  // sent from the CRM or straight from the WhatsApp phone, deleted or not.
+  const { rows } = await pool.query(
+    `SELECT * FROM (
+       SELECT t.id, t.ticket_no, t.student_name, t.student_phone, t.status, t.category,
+              t.priority, t.assignee, t.created_at, t.updated_at,
+              CASE WHEN t.status IN ('resolved','closed') THEN COALESCE(t.resolved_at, t.updated_at) END AS resolved_at,
+              (SELECT MIN(m.created_at) FROM messages m
+                WHERE m.ticket_id = t.id AND m.direction = 'outbound' AND m.created_at >= t.created_at
+              ) AS first_response_at
+       FROM tickets t
+       WHERE t.created_at < $2
+     ) q
+     WHERE q.created_at >= $1 OR q.first_response_at IS NULL OR q.first_response_at >= $1
+     ORDER BY q.created_at`,
+    [fromUtc, toUtcExclusive]
+  );
+
+  const report = buildTatReport(
+    {
+      tickets: rows.map((r) => ({
+        id: r.id,
+        ticketNo: r.ticket_no,
+        studentName: r.student_name,
+        studentPhone: r.student_phone,
+        status: r.status,
+        category: r.category,
+        priority: r.priority,
+        assignee: r.assignee,
+        receivedAt: r.created_at,
+        firstResponseAt: r.first_response_at,
+        resolvedAt: r.resolved_at,
+      })),
+      period,
+      fromKey,
+      toKey,
+      now,
+    },
+    { holidays: holidays.dates }
+  );
+
+  res.json({
+    config: { ...TAT_CONFIG, holidays: holidays.rows },
+    ...report,
   });
 });
 

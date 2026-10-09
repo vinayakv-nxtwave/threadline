@@ -4,6 +4,8 @@ import { pool } from "../db.js";
 import { addMessage, getTurnaroundTime } from "../services/ticketService.js";
 import { sendText, sendMedia, sendReaction } from "../services/whapiClient.js";
 import { askAboutTicket } from "../services/classifier.js";
+import { loadHolidays } from "../services/holidays.js";
+import { evaluateTicket } from "../services/tat.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024 } });
@@ -40,7 +42,10 @@ router.get("/", async (req, res) => {
        )) AS turnaround_seconds,
        CASE WHEN t.resolved_at IS NOT NULL THEN
          EXTRACT(EPOCH FROM (t.resolved_at - COALESCE(t.last_reopened_at, t.created_at)))
-       END AS resolution_seconds
+       END AS resolution_seconds,
+       (SELECT MIN(m.created_at) FROM messages m
+         WHERE m.ticket_id = t.id AND m.direction = 'outbound' AND m.created_at >= t.created_at
+       ) AS first_response_at
      FROM tickets t
      LEFT JOIN LATERAL (
        SELECT body, direction FROM messages WHERE ticket_id = t.id ORDER BY created_at DESC LIMIT 1
@@ -49,12 +54,35 @@ router.get("/", async (req, res) => {
      ORDER BY t.last_message_at DESC`,
     params
   );
+  // TAT state per ticket, so the inbox can float after-hours queries that are
+  // still waiting on a first reply to the top. See docs/TAT.md.
+  const { dates: holidays } = await loadHolidays();
+  const now = new Date();
   res.json(
-    rows.map((r) => ({
-      ...r,
-      turnaroundSeconds: r.turnaround_seconds != null ? Math.round(r.turnaround_seconds) : null,
-      resolutionSeconds: r.resolution_seconds != null ? Math.round(r.resolution_seconds) : null,
-    }))
+    rows.map((r) => {
+      const tat = evaluateTicket(
+        {
+          receivedAt: r.created_at,
+          firstResponseAt: r.first_response_at,
+          resolvedAt: ["resolved", "closed"].includes(r.status) ? r.resolved_at || r.updated_at : null,
+        },
+        now,
+        { holidays }
+      );
+      return {
+        ...r,
+        turnaroundSeconds: r.turnaround_seconds != null ? Math.round(r.turnaround_seconds) : null,
+        resolutionSeconds: r.resolution_seconds != null ? Math.round(r.resolution_seconds) : null,
+        tat: {
+          afterHours: tat.afterHours,
+          clockStartAt: tat.clockStartAt,
+          responseDueAt: tat.responseDueAt,
+          responseStatus: tat.responseStatus,
+          resolutionDueAt: tat.resolutionDueAt,
+          resolutionStatus: tat.resolutionStatus,
+        },
+      };
+    })
   );
 });
 
