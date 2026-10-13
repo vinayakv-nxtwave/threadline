@@ -27,6 +27,7 @@ In the Neon console, create a new project (or a new database in the existing pro
 
 ```bash
 psql "<BETA_DATABASE_URL>" -f src/schema.sql
+psql "<BETA_DATABASE_URL>" -f src/holidays.sql
 ```
 
 Don't use a Neon *branch of the prod database* — that would copy real students' phone numbers and chats into beta.
@@ -63,6 +64,7 @@ feature/xyz ──merge──▶ beta ──(auto-deploys beta)──▶ test on
 2. Test on the beta dashboard (simulate messages, run the seed script, check reports).
 3. When it's signed off, merge `beta` into `main` and push. Render redeploys prod.
 4. **If the release changes `src/schema.sql`, run it against the prod database *before* merging to `main`.** Every statement in it is safe to re-run.
+5. **If the release changes `src/holidays.sql`, run it on beta and prod too.** It only adds dates that aren't there yet.
 
 ## Running against beta from your machine
 

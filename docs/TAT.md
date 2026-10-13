@@ -8,7 +8,7 @@ These are the exact rules the dashboard uses. The code is `src/services/tat.js`,
 |---|---|
 | Working hours | **10:00–18:00 IST** (8 hours a day) |
 | Working days | **Monday–Saturday** (Sunday is off) |
-| Holidays | Added in the dashboard (**TAT Reports → Holidays**). No TAT time counts on a holiday. |
+| Holidays | The company list lives in `src/holidays.sql` (run it on each database). One-off holidays can also be added in the dashboard (**TAT Reports → Holidays**). No TAT time counts on a holiday. |
 | Response TAT | **3 working hours** |
 | Resolution TAT | **24 working hours = 3 full working days** |
 
