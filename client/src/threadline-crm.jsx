@@ -173,6 +173,7 @@ export default function ThreadlineCRM() {
   const [recording, setRecording] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const threadEndRef = useRef(null);
+  const selectedIdRef = useRef(null);
   const fileInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
@@ -229,7 +230,9 @@ export default function ThreadlineCRM() {
   const fetchDetail = async (id) => {
     try {
       const data = await api(`/api/tickets/${id}`);
-      setSelectedDetail(data);
+      // The chat may have been closed or switched while this was in flight --
+      // don't let a late response reopen it.
+      if (selectedIdRef.current === id) setSelectedDetail(data);
     } catch (err) {
       if (err.unauthorized) return handleLogout();
       setConnected(false);
@@ -257,8 +260,39 @@ export default function ThreadlineCRM() {
   }, [token]);
 
   useEffect(() => {
-    if (!selectedId && tickets.length > 0) setSelectedId(tickets[0].id);
-  }, [tickets, selectedId]);
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  // Like WhatsApp: the inbox opens with no chat selected, a chat opens when
+  // clicked, and closes with the X in its header or the Esc key.
+  const closeChat = () => {
+    selectedIdRef.current = null;
+    setSelectedId(null);
+    setSelectedDetail(null);
+    setDraft("");
+    setReplyingTo(null);
+    setShowEmojiPicker(false);
+  };
+
+  const openChat = (id) => {
+    if (id === selectedIdRef.current) return;
+    selectedIdRef.current = id;
+    setSelectedDetail(null); // don't flash the previous chat while this one loads
+    setDraft("");
+    setReplyingTo(null);
+    setSelectedId(id);
+  };
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      if (showEmojiPicker) return setShowEmojiPicker(false); // Esc closes the picker first
+      closeChat();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId, showEmojiPicker]);
 
   useEffect(() => {
     if (!token || !selectedId) return;
@@ -576,7 +610,7 @@ export default function ThreadlineCRM() {
           <TatReportView
             onUnauthorized={handleLogout}
             onViewTicket={(id) => {
-              setSelectedId(id);
+              openChat(id);
               setView("tickets");
             }}
           />
@@ -586,7 +620,7 @@ export default function ThreadlineCRM() {
           <AnalyticsView
             onUnauthorized={handleLogout}
             onViewTicket={(id) => {
-              setSelectedId(id);
+              openChat(id);
               setView("tickets");
             }}
           />
@@ -664,7 +698,7 @@ export default function ThreadlineCRM() {
               return (
                 <button
                   key={t.id}
-                  onClick={() => setSelectedId(t.id)}
+                  onClick={() => openChat(t.id)}
                   style={{
                     background: active ? C.paperDim : "transparent",
                     borderLeft: active ? `3px solid ${C.ink}` : "3px solid transparent",
@@ -780,6 +814,15 @@ export default function ThreadlineCRM() {
                   {selected.student_phone} · {selected.ticket_no}
                 </div>
               </div>
+              <button
+                onClick={closeChat}
+                title="Close chat (Esc)"
+                aria-label="Close chat"
+                style={{ color: C.slate }}
+                className="p-1.5 rounded-md hover:bg-black/5 transition-colors"
+              >
+                <X size={18} />
+              </button>
             </div>
 
             {(() => {
@@ -1008,8 +1051,23 @@ export default function ThreadlineCRM() {
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-sm" style={{ color: C.slateLight }}>
-            {loading ? "Loading…" : "Select a ticket to view the conversation."}
+          <div
+            className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6"
+            style={{ background: C.paper, color: C.slateLight }}
+          >
+            {selectedId ? (
+              <span className="text-sm">Loading conversation…</span>
+            ) : (
+              <>
+                <div style={{ background: C.paperDim }} className="w-14 h-14 rounded-full flex items-center justify-center">
+                  <MessageCircle size={26} color={C.slateLight} />
+                </div>
+                <div className="text-sm font-medium" style={{ color: C.slate }}>
+                  No chat open
+                </div>
+                <div className="text-xs max-w-xs">Select a chat from the list to view the conversation and reply.</div>
+              </>
+            )}
           </div>
         )}
 
@@ -1033,7 +1091,7 @@ export default function ThreadlineCRM() {
               <div className="text-xs">
                 <span style={{ color: C.slateLight }}>Previous ticket: </span>
                 <button
-                  onClick={() => setSelectedId(selected.previous_ticket_id)}
+                  onClick={() => openChat(selected.previous_ticket_id)}
                   className="underline"
                   style={{ color: C.ink }}
                 >
