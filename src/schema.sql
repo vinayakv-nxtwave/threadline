@@ -114,3 +114,8 @@ SELECT t.id, NULL, t.status, 'backfill',
        CASE WHEN t.status = 'new' THEN t.created_at ELSE t.updated_at END
 FROM tickets t
 WHERE NOT EXISTS (SELECT 1 FROM ticket_status_events e WHERE e.ticket_id = t.id);
+
+-- Set when the student edits a WhatsApp message after sending it; body holds the edited text
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+-- Speeds up the duplicate check done for every incoming webhook/sync message
+CREATE INDEX IF NOT EXISTS idx_messages_whapi_id ON messages (whapi_message_id);

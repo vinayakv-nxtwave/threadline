@@ -8,17 +8,18 @@ import { TRANSITIONS, pendingTime } from "./statusRules.js";
  * a click) can't race it into a wrong state. Returns the previous status if
  * it changed, otherwise null.
  */
-export async function applyTransition(ticketId, event) {
+export async function applyTransition(ticketId, event, at = null) {
   const t = TRANSITIONS[event];
   if (!t) throw new Error(`unknown status transition: ${event}`);
-  return setStatus(ticketId, t.to, { from: t.from, reason: event });
+  return setStatus(ticketId, t.to, { from: t.from, reason: event, at });
 }
 
 /**
  * Sets a ticket's status and records it in ticket_status_events.
  * @param from  only change if the current status is one of these (null = any)
+ * @param at    when it happened (for recovered messages); null = now
  */
-export async function setStatus(ticketId, to, { from = null, reason }) {
+export async function setStatus(ticketId, to, { from = null, reason, at = null }) {
   const { rows } = await pool.query(
     `WITH cur AS (SELECT id, status FROM tickets WHERE id = $1 FOR UPDATE)
      UPDATE tickets t SET status = $2
@@ -28,7 +29,7 @@ export async function setStatus(ticketId, to, { from = null, reason }) {
     [ticketId, to, from]
   );
   if (!rows[0]) return null;
-  await recordStatusEvent(ticketId, rows[0].from_status, to, reason);
+  await recordStatusEvent(ticketId, rows[0].from_status, to, reason, at);
   return rows[0].from_status;
 }
 

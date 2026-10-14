@@ -14,12 +14,29 @@ export async function findLatestTicketByPhone(phone) {
   return rows[0] || null;
 }
 
-export async function createTicket({ phone, name }) {
+/**
+ * Which ticket a message received at `at` belongs to: the student's latest
+ * ticket created at or before that moment. Matters for messages recovered
+ * late by the catch-up sync -- they go where they would have gone live.
+ */
+async function findTicketAt(phone, at) {
   const { rows } = await pool.query(
-    `INSERT INTO tickets (student_phone, student_name, status)
-     VALUES ($1, $2, 'new')
+    `SELECT * FROM tickets WHERE student_phone = $1 AND created_at <= $2 ORDER BY created_at DESC LIMIT 1`,
+    [phone, at]
+  );
+  return rows[0] || null;
+}
+
+// A recovered message older than every ticket for the student is still part
+// of their first ticket's conversation if it came at most this long before it.
+const SAME_CONVERSATION_MS = 24 * 60 * 60 * 1000;
+
+export async function createTicket({ phone, name, createdAt = null }) {
+  const { rows } = await pool.query(
+    `INSERT INTO tickets (student_phone, student_name, status, created_at, last_message_at)
+     VALUES ($1, $2, 'new', COALESCE($3, now()), COALESCE($3, now()))
      RETURNING *`,
-    [phone, name || null]
+    [phone, name || null, createdAt]
   );
   const ticket = rows[0];
 
@@ -45,15 +62,20 @@ export async function addMessage(
     caption = null,
     whapiMessageId = null,
     quotedMessageId = null,
+    createdAt = null, // when it was really sent; null = now
   }
 ) {
   const { rows } = await pool.query(
-    `INSERT INTO messages (ticket_id, direction, message_type, body, media_url, mime_type, filename, caption, whapi_message_id, quoted_message_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    `INSERT INTO messages (ticket_id, direction, message_type, body, media_url, mime_type, filename, caption, whapi_message_id, quoted_message_id, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, now()))
      RETURNING *`,
-    [ticketId, direction, messageType, body, mediaUrl, mimeType, filename, caption, whapiMessageId, quotedMessageId]
+    [ticketId, direction, messageType, body, mediaUrl, mimeType, filename, caption, whapiMessageId, quotedMessageId, createdAt]
   );
-  await pool.query(`UPDATE tickets SET last_message_at = now() WHERE id = $1`, [ticketId]);
+  // GREATEST: a recovered older message mustn't make the ticket look stale
+  await pool.query(`UPDATE tickets SET last_message_at = GREATEST(last_message_at, $2) WHERE id = $1`, [
+    ticketId,
+    rows[0].created_at,
+  ]);
   return rows[0];
 }
 
@@ -155,19 +177,46 @@ export async function handleIncomingMessage({
   caption,
   whapiMessageId,
   quotedMessageId,
+  receivedAt = null, // when the student really sent it (Whapi timestamp); null = now
 }) {
   const normalizedPhone = normalizePhone(phone);
-  let ticket = await findLatestTicketByPhone(normalizedPhone);
+  const at = receivedAt ? new Date(receivedAt) : new Date();
+  let ticket = await findTicketAt(normalizedPhone, at);
   let newTicketCreated = false;
 
   if (!ticket) {
-    ticket = await createTicket({ phone: normalizedPhone, name });
+    // Older than all of this student's tickets -- only possible for a message
+    // recovered late. If their first ticket started soon after, this message
+    // is where that conversation really began: move the ticket's start back
+    // so TAT is measured from the true first message.
+    const { rows: firstRows } = await pool.query(
+      `SELECT * FROM tickets WHERE student_phone = $1 ORDER BY created_at ASC LIMIT 1`,
+      [normalizedPhone]
+    );
+    const first = firstRows[0];
+    if (first && new Date(first.created_at) - at <= SAME_CONVERSATION_MS) {
+      await pool.query(`UPDATE tickets SET created_at = $1 WHERE id = $2`, [at, first.id]);
+      await pool.query(
+        `UPDATE ticket_status_events SET created_at = $1
+         WHERE ticket_id = $2 AND from_status IS NULL AND to_status = 'new'`,
+        [at, first.id]
+      );
+      ticket = { ...first, created_at: at };
+    }
+  }
+
+  if (!ticket) {
+    ticket = await createTicket({ phone: normalizedPhone, name, createdAt: receivedAt });
     newTicketCreated = true;
-  } else if (["resolved", "closed"].includes(ticket.status)) {
-    // The most recent ticket for this student is finished. Treat this as a
+  } else if (
+    ["resolved", "closed"].includes(ticket.status) &&
+    (!ticket.resolved_at || at > new Date(ticket.resolved_at))
+  ) {
+    // The ticket was already finished when this arrived. Treat it as a
     // genuinely new query rather than reopening old, resolved history.
+    // (A recovered message from BEFORE the resolve belongs to that ticket.)
     const previousTicketId = ticket.id;
-    ticket = await createTicket({ phone: normalizedPhone, name });
+    ticket = await createTicket({ phone: normalizedPhone, name, createdAt: receivedAt });
     await pool.query(`UPDATE tickets SET previous_ticket_id = $1 WHERE id = $2`, [previousTicketId, ticket.id]);
     ticket.previous_ticket_id = previousTicketId;
     newTicketCreated = true;
@@ -189,6 +238,7 @@ export async function handleIncomingMessage({
     caption,
     whapiMessageId,
     quotedMessageId,
+    createdAt: receivedAt,
   });
 
   if (!ticket.manually_classified) {
@@ -224,10 +274,11 @@ export async function logAgentMessageFromPhone({
   filename,
   caption,
   whapiMessageId,
+  sentAt = null, // when it was really sent (Whapi timestamp); null = now
 }) {
   const normalizedPhone = normalizePhone(phone);
-  const ticket = await findLatestTicketByPhone(normalizedPhone);
-  if (!ticket) return null; // no matching ticket, nothing to attach this to
+  const ticket = await findTicketAt(normalizedPhone, sentAt ? new Date(sentAt) : new Date());
+  if (!ticket) return null; // no ticket existed yet when this was sent (e.g. a proactive message)
 
   // Skip if this exact message was already logged (e.g. sent via the CRM's
   // own /reply endpoint, which Whapi then echoes back as from_me:true).
@@ -245,9 +296,10 @@ export async function logAgentMessageFromPhone({
     filename,
     caption,
     whapiMessageId,
+    createdAt: sentAt,
   });
 
-  await applyTransition(ticket.id, "agent_reply");
+  await applyTransition(ticket.id, "agent_reply", sentAt);
 
   return ticket;
 }

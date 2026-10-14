@@ -982,6 +982,7 @@ export default function ThreadlineCRM() {
                               {m.pinned && <Pin size={9} />}
                               {m.starred && <Star size={9} fill="currentColor" />}
                               {timeAgo(new Date(m.created_at).getTime())}
+                              {m.edited_at && <span title={`Edited ${formatDue(m.edited_at)}`}>· edited</span>}
                             </div>
                           </div>
                         </div>

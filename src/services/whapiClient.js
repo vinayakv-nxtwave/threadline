@@ -109,3 +109,32 @@ export async function sendReaction(whapiMessageId, emoji) {
 
   return data;
 }
+
+/**
+ * Every message on the channel since `sinceSeconds` (unix), all pages,
+ * including reactions/edits/system events. Used by the catch-up sync.
+ * Refuses in beta, which must never read the production channel.
+ */
+export async function listMessages(sinceSeconds, { pageSize = 100, maxPages = 200 } = {}) {
+  if (IS_BETA) throw new Error("listMessages is disabled in beta");
+  if (!TOKEN) throw new Error("WHAPI_TOKEN is not set. Add it to your .env file.");
+
+  const all = [];
+  for (let page = 0; page < maxPages; page++) {
+    const qs = new URLSearchParams({
+      count: String(pageSize),
+      offset: String(page * pageSize),
+      time_from: String(sinceSeconds),
+      normal_types: "false",
+    });
+    const res = await fetch(`${WHAPI_BASE}/messages/list?${qs}`, {
+      headers: { accept: "application/json", authorization: `Bearer ${TOKEN}` },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`Whapi list failed (${res.status}): ${JSON.stringify(data).slice(0, 200)}`);
+    const batch = data.messages || [];
+    all.push(...batch);
+    if (batch.length < pageSize) return all;
+  }
+  throw new Error(`Whapi list: more than ${maxPages * pageSize} messages in window -- narrow it`);
+}
