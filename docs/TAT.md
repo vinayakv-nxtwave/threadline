@@ -27,8 +27,8 @@ All values are in `TAT_CONFIG` at the top of `src/services/tat.js`. Change them 
 - **Within TAT:** done **at or before** the deadline. A reply at exactly the deadline is within TAT.
 - **Breached:** done after the deadline (**late**), or not done and the deadline has passed (**overdue**).
   - A deadline that lands on 18:00 means 18:00 that day. A reply at 18:30 the same evening is breached, even though no extra *working* time passed.
-- **Pending (not yet responded):** a query with no reply yet.
-  - **Pending at close** (daily report): the number of queries still without a reply at 18:00 that day. It includes queries received on earlier days. For today it's counted as of right now. Sundays and holidays show "—".
+- **Awaiting our reply:** a query with no reply from us yet. This is not the same as the **Pending** status; see docs/STATUSES.md.
+  - **Awaiting our reply at close** (daily report): the number of queries still without a reply at 18:00 that day. It includes queries received on earlier days. For today it's counted as of right now. Sundays and holidays show "—".
   - For weekly and monthly reports, it's counted at 18:00 on the last working day of the period.
 - **Working time shown on a ticket:** only the working hours between the query arriving and the reply or resolution (or now, if not done yet).
 
@@ -44,7 +44,7 @@ The per-period columns are:
 - Resolved within TAT
 - Resolution TAT breached
 - Not yet resolved
-- Pending at close
+- Awaiting our reply at close
 - Received after-hours
 
 Click any number to see the list of tickets behind it: received / due / done times, status, and working time taken. Click a ticket number to open the conversation. Both the summary and the ticket list download as CSV.
@@ -89,7 +89,7 @@ October 2026 calendar: Mon 12, Tue 13, Wed 14, Thu 15, Fri 16, Sat 17, Sun 18, M
 | W1–W5 | working time: Mon 17:00→Tue 11:00 = 2h; Mon 17:00→Tue 09:00 = 1h; Sat 17:00→Mon 10:30 = 1h30 | |
 
 **End-to-end daily report.** The test uses seven queries (A–G), including two from the previous Friday, and checks every count:
-- Pending at close: 2 on Monday, 2 on Tuesday, 3 for Wednesday as of 12:00.
+- Awaiting our reply at close: 2 on Monday, 2 on Tuesday, 3 for Wednesday as of 12:00.
 - Range totals: 5 received, 2 responded within TAT, 2 response breaches.
 
 **On beta:** `scripts/seed-beta-tat.js` loads 10 scenarios (S1–S10), including a seeded holiday, into the beta database. Each ticket's notes say what the dashboard should show for it.

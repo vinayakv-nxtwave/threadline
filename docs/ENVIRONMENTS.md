@@ -65,6 +65,7 @@ feature/xyz ──merge──▶ beta ──(auto-deploys beta)──▶ test on
 3. When it's signed off, merge `beta` into `main` and push. Render redeploys prod.
 4. **If the release changes `src/schema.sql`, run it against the prod database *before* merging to `main`.** Every statement in it is safe to re-run.
 5. **If the release changes `src/holidays.sql`, run it on beta and prod too.** It only adds dates that aren't there yet.
+6. **If the release adds a file in `migrations/`, run it once on each database, after deploying the code.** Each migration file says when to run it. These files are one-off: never re-run them.
 
 ## Running against beta from your machine
 

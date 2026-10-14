@@ -19,7 +19,7 @@ const COLUMNS = [
   { key: "resolvedWithinTat", label: "Resolved within TAT", tone: "good" },
   { key: "resolutionBreached", label: "Resolution TAT breached", tone: "bad" },
   { key: "unresolved", label: "Not yet resolved" },
-  { key: "backlogAtClose", label: "Pending at close", hint: "Unanswered queries (incl. earlier days) at 18:00 on the last working day — or now, for today" },
+  { key: "backlogAtClose", label: "Awaiting our reply at close", hint: "Queries with no reply from us yet (incl. earlier days) at 18:00 on the last working day — or now, for today" },
   { key: "afterHours", label: "Received after-hours" },
 ];
 
@@ -249,7 +249,7 @@ export default function TatReportView({ onUnauthorized, onViewTicket }) {
       [
         "Ticket", "Student", "Phone", "Category", "Priority", "Status", "Assignee", "Received (IST)", "After-hours",
         "Response due", "First response", "Response working time", "Response TAT",
-        "Resolution due", "Resolved", "Resolution working time", "Resolution TAT",
+        "Resolution due", "Resolved", "Resolution working time", "Resolution TAT", "Time in Pending (working)",
       ],
       drillTickets.map((t) => [
         t.ticketNo, t.studentName, t.studentPhone, t.category, t.priority, t.status, t.assignee,
@@ -258,6 +258,7 @@ export default function TatReportView({ onUnauthorized, onViewTicket }) {
         RESPONSE_STATUS[t.tat.responseStatus].label,
         formatIst(t.tat.resolutionDueAt), formatIst(t.tat.resolvedAt), formatWorking(t.tat.resolutionWorkingMinutes),
         RESOLUTION_STATUS[t.tat.resolutionStatus].label,
+        t.pendingTime?.stints ? formatWorking(t.pendingTime.totalWorkingMinutes) : "",
       ])
     );
 
@@ -373,7 +374,7 @@ export default function TatReportView({ onUnauthorized, onViewTicket }) {
         />
         <Kpi
           icon={Hourglass}
-          label="Pending"
+          label="Awaiting our reply"
           value={totals.awaitingResponse}
           sub={`not yet responded · ${totals.unresolved} not yet resolved`}
           accent={C.amber}
@@ -532,7 +533,7 @@ export default function TatReportView({ onUnauthorized, onViewTicket }) {
             <table className="w-full text-xs">
               <thead>
                 <tr style={{ color: C.slateLight, borderColor: C.line }} className="text-left border-b">
-                  {["Ticket", "Student", "Category", "Status", "Received (IST)", "Response due", "First response", "Response", "Resolution due", "Resolved", "Resolution"].map(
+                  {["Ticket", "Student", "Category", "Status", "Received (IST)", "Response due", "First response", "Response", "Resolution due", "Resolved", "Resolution", "Time in Pending"].map(
                     (h) => (
                       <th key={h} className="pb-2 pr-3 font-medium whitespace-nowrap">
                         {h}
@@ -580,6 +581,10 @@ export default function TatReportView({ onUnauthorized, onViewTicket }) {
                       <td className="py-2 pr-3 mono whitespace-nowrap">{formatIst(t.tat.resolvedAt)}</td>
                       <td className="py-2 pr-3 whitespace-nowrap" style={{ color: C[ss.tone] }}>
                         {ss.label} <span className="mono" style={{ color: C.slateLight }}>{formatWorking(t.tat.resolutionWorkingMinutes)}</span>
+                      </td>
+                      <td className="py-2 pr-3 mono whitespace-nowrap" style={{ color: t.status === "pending" ? C.amber : C.slate }}>
+                        {t.pendingTime?.stints ? formatWorking(t.pendingTime.totalWorkingMinutes) : "—"}
+                        {t.status === "pending" && " (ongoing)"}
                       </td>
                     </tr>
                   );

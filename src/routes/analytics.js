@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { pool } from "../db.js";
 import { loadHolidays } from "../services/holidays.js";
+import { loadPendingTimes } from "../services/status.js";
 import {
   TAT_CONFIG,
   PERIODS,
@@ -188,9 +189,11 @@ router.get("/tat", async (req, res) => {
     [fromUtc, toUtcExclusive]
   );
 
+  const pending = await loadPendingTimes(rows.map((r) => r.id), holidays.dates, now);
   const report = buildTatReport(
     {
       tickets: rows.map((r) => ({
+        pendingTime: pending.get(r.id),
         id: r.id,
         ticketNo: r.ticket_no,
         studentName: r.student_name,

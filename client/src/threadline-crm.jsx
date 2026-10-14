@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import {
-  Search, Lock, Unlock, CheckCircle2, Clock, AlertTriangle, Send,
+  Search, CheckCircle2, Clock, AlertTriangle, Send,
   Phone, Calendar, ChevronDown, X, Circle, MessageCircle, Tag as TagIcon, LogOut,
   Smile, Paperclip, Mic, Pin, Star, Reply as ReplyIcon,
 } from "lucide-react";
@@ -33,13 +33,41 @@ export const C = {
   line: "#E4E1D8",
 };
 
+// The four statuses -- rules in docs/STATUSES.md. `hint` is shown on hover.
 export const STATUS = {
-  new: { label: "New", color: C.coral, tint: C.coralTint },
-  open: { label: "Open", color: C.green, tint: C.greenTint },
-  pending: { label: "Pending", color: C.amber, tint: C.amberTint },
-  resolved: { label: "Resolved", color: C.greenDark, tint: C.greenTint },
-  closed: { label: "Closed", color: C.slate, tint: C.paperDim },
+  new: {
+    label: "New Ticket",
+    color: C.coral,
+    tint: C.coralTint,
+    hint: "Ticket received, no agent has opened it yet. Response TAT has started.",
+  },
+  open: {
+    label: "Open",
+    color: C.green,
+    tint: C.greenTint,
+    hint: "An agent has opened the chat and is working on it, but hasn't replied yet.",
+  },
+  pending: {
+    label: "Pending",
+    color: C.amber,
+    tint: C.amberTint,
+    hint: "We've replied and are waiting on a dependency. Student messages keep it Pending. TAT keeps running.",
+  },
+  resolved: {
+    label: "Resolved",
+    color: C.greenDark,
+    tint: C.greenTint,
+    hint: "Issue addressed. Resolution TAT clock stopped and the ticket is closed.",
+  },
 };
+
+// "2h 05m" from working minutes
+export function formatWorkingMinutes(minutes) {
+  if (minutes == null) return "—";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h ? `${h}h ${String(m).padStart(2, "0")}m` : `${m}m`;
+}
 
 export const PRIORITY = {
   urgent: { label: "Urgent", color: C.coral },
@@ -281,6 +309,13 @@ export default function ThreadlineCRM() {
     setDraft("");
     setReplyingTo(null);
     setSelectedId(id);
+    api(`/api/tickets/${id}/opened`, { method: "POST" })
+      .then((res) => {
+        if (!res.changed) return;
+        setTickets((prev) => prev.map((t) => (t.id === id ? { ...t, status: "open" } : t)));
+        fetchDetail(id);
+      })
+      .catch((err) => err.unauthorized && handleLogout());
   };
 
   useEffect(() => {
@@ -412,13 +447,7 @@ export default function ThreadlineCRM() {
 
   const handleMarkResolved = (ticket) => {
     updateTicket(ticket.id, { status: "resolved" });
-    showToast(`${ticket.ticket_no} marked resolved. You can close it now.`);
-  };
-
-  const handleClose = (ticket) => {
-    if (ticket.status !== "resolved") return;
-    updateTicket(ticket.id, { status: "closed" });
-    showToast(`${ticket.ticket_no} closed.`);
+    showToast(`${ticket.ticket_no} resolved. Resolution TAT stopped.`);
   };
 
   const filtered = tickets
@@ -647,20 +676,21 @@ export default function ThreadlineCRM() {
               />
             </div>
             <div className="flex gap-1.5 mt-3 flex-wrap">
-              {["all", "new", "open", "pending", "resolved", "closed"].map((f) => {
+              {["all", "new", "open", "pending", "resolved"].map((f) => {
                 const active = filter === f;
                 const meta = STATUS[f];
                 return (
                   <button
                     key={f}
                     onClick={() => setFilter(f)}
+                    title={meta?.hint || "Every ticket"}
                     style={{
                       background: active ? (meta ? meta.color : C.ink) : C.paperDim,
                       color: active ? "#fff" : C.slate,
                     }}
                     className="text-xs px-2.5 py-1 rounded-full font-medium capitalize transition-colors"
                   >
-                    {f} {counts[f] ? <span className="mono opacity-80">{counts[f]}</span> : null}
+                    {meta ? meta.label : "All"} {counts[f] ? <span className="mono opacity-80">{counts[f]}</span> : null}
                   </button>
                 );
               })}
@@ -778,6 +808,11 @@ export default function ThreadlineCRM() {
                       ) : (
                         <span className="text-[10px]" style={{ color: C.coral }}>
                           awaiting reply
+                        </span>
+                      )}
+                      {t.status === "pending" && t.pendingTime?.currentSince && (
+                        <span className="text-[10px] mono" style={{ color: C.amber }} title="Time in Pending (working hours)">
+                          ⏸ {formatWorkingMinutes(t.pendingTime.currentWorkingMinutes)}
                         </span>
                       )}
                       {t.resolutionSeconds != null && (
@@ -1118,24 +1153,36 @@ export default function ThreadlineCRM() {
                 Resolved in {formatDuration(selected.resolutionSeconds)}
               </div>
             )}
+            {selected.pendingTime?.currentSince && (
+              <div className="text-xs" style={{ color: C.amber }}>
+                Pending for {formatWorkingMinutes(selected.pendingTime.currentWorkingMinutes)} (working hrs) · since{" "}
+                {formatDue(selected.pendingTime.currentSince)}
+              </div>
+            )}
+            {!selected.pendingTime?.currentSince && selected.pendingTime?.stints > 0 && (
+              <div className="text-xs" style={{ color: C.slate }}>
+                Was Pending for {formatWorkingMinutes(selected.pendingTime.totalWorkingMinutes)} (working hrs)
+              </div>
+            )}
 
             <div>
               <div className="text-[10px] uppercase tracking-wide font-medium mb-1.5" style={{ color: C.slateLight }}>
                 Status
+              </div>
+              <div className="text-[11px] mb-2" style={{ color: C.slate }}>
+                {STATUS[selected.status]?.hint}
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {Object.entries(STATUS).map(([key, meta]) => (
                   <button
                     key={key}
                     onClick={() => updateTicket(selected.id, { status: key })}
-                    disabled={key === "closed"}
+                    title={meta.hint}
                     style={{
                       background: selected.status === key ? meta.color : C.paperDim,
                       color: selected.status === key ? "#fff" : C.slate,
-                      opacity: key === "closed" ? 0.5 : 1,
-                      cursor: key === "closed" ? "not-allowed" : "pointer",
                     }}
-                    className="text-xs px-2.5 py-1 rounded-full font-medium capitalize"
+                    className="text-xs px-2.5 py-1 rounded-full font-medium"
                   >
                     {meta.label}
                   </button>
@@ -1229,35 +1276,22 @@ export default function ThreadlineCRM() {
             <div style={{ borderTop: `1px solid ${C.line}` }} className="pt-4 space-y-2">
               <button
                 onClick={() => handleMarkResolved(selected)}
-                disabled={selected.status === "resolved" || selected.status === "closed"}
+                disabled={selected.status === "resolved"}
                 style={{
-                  background: selected.status === "resolved" || selected.status === "closed" ? C.paperDim : C.greenTint,
-                  color: selected.status === "resolved" || selected.status === "closed" ? C.slateLight : C.greenDark,
-                  cursor: selected.status === "resolved" || selected.status === "closed" ? "not-allowed" : "pointer",
+                  background: selected.status === "resolved" ? C.paperDim : C.greenTint,
+                  color: selected.status === "resolved" ? C.slateLight : C.greenDark,
+                  cursor: selected.status === "resolved" ? "not-allowed" : "pointer",
                 }}
                 className="w-full text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-2"
               >
-                <CheckCircle2 size={15} /> Mark as resolved
+                <CheckCircle2 size={15} /> {selected.status === "resolved" ? "Resolved" : "Mark as resolved"}
               </button>
+              <div className="text-[10px] text-center" style={{ color: C.slateLight }}>
+                {selected.status === "resolved"
+                  ? "If the student messages again, a new ticket is created."
+                  : "Stops the resolution TAT clock and closes the ticket."}
+              </div>
 
-              <button
-                onClick={() => handleClose(selected)}
-                disabled={selected.status !== "resolved"}
-                style={{
-                  background: selected.status === "resolved" ? C.ink : C.paperDim,
-                  color: selected.status === "resolved" ? "#fff" : C.slateLight,
-                  cursor: selected.status === "resolved" ? "pointer" : "not-allowed",
-                }}
-                className="w-full text-sm font-medium py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors"
-              >
-                {selected.status === "resolved" ? <Unlock size={14} /> : <Lock size={14} />}
-                Close ticket
-              </button>
-              {selected.status !== "resolved" && selected.status !== "closed" && (
-                <div className="text-[10px] text-center flex items-center justify-center gap-1" style={{ color: C.slateLight }}>
-                  <Lock size={10} /> Locked until the query is resolved
-                </div>
-              )}
             </div>
           </div>
         )}

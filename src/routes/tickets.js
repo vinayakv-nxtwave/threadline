@@ -6,6 +6,8 @@ import { sendText, sendMedia, sendReaction } from "../services/whapiClient.js";
 import { askAboutTicket } from "../services/classifier.js";
 import { loadHolidays } from "../services/holidays.js";
 import { evaluateTicket } from "../services/tat.js";
+import { applyTransition, recordStatusEvent, loadPendingTimes, loadStatusEvents } from "../services/status.js";
+import { STATUSES } from "../services/statusRules.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 16 * 1024 * 1024 } });
@@ -58,6 +60,7 @@ router.get("/", async (req, res) => {
   // still waiting on a first reply to the top. See docs/TAT.md.
   const { dates: holidays } = await loadHolidays();
   const now = new Date();
+  const pending = await loadPendingTimes(rows.map((r) => r.id), holidays, now);
   res.json(
     rows.map((r) => {
       const tat = evaluateTicket(
@@ -81,6 +84,7 @@ router.get("/", async (req, res) => {
           resolutionDueAt: tat.resolutionDueAt,
           resolutionStatus: tat.resolutionStatus,
         },
+        pendingTime: pending.get(r.id),
       };
     })
   );
@@ -135,7 +139,20 @@ router.get("/:id", async (req, res) => {
       )
     : null;
 
-  res.json({ ...ticket, messages, turnaroundTime, resolutionSeconds });
+  const { dates: holidays } = await loadHolidays();
+  const statusHistory = (await loadStatusEvents([ticket.id])).get(ticket.id) || [];
+  const pendingTime = (await loadPendingTimes([ticket.id], holidays)).get(ticket.id);
+
+  res.json({ ...ticket, messages, turnaroundTime, resolutionSeconds, statusHistory, pendingTime });
+});
+
+// POST /api/tickets/:id/opened  -> an agent opened this chat in the CRM.
+// New Ticket -> Open; any other status is left as it is.
+router.post("/:id/opened", async (req, res) => {
+  const { rows } = await pool.query("SELECT id FROM tickets WHERE id = $1", [req.params.id]);
+  if (!rows[0]) return res.status(404).json({ error: "not found" });
+  const previous = await applyTransition(rows[0].id, "agent_opened");
+  res.json({ ok: true, changed: previous !== null });
 });
 
 // PATCH /api/tickets/:id  -> update status / category / priority / assignee / notes / tags
@@ -148,15 +165,17 @@ router.patch("/:id", async (req, res) => {
   if (!current[0]) return res.status(404).json({ error: "not found" });
   const currentTicket = current[0];
 
-  // Server-side enforcement of the core rule: can't close an unresolved ticket.
-  if (status === "closed" && currentTicket.status !== "resolved") {
-    return res
-      .status(400)
-      .json({ error: "Ticket must be marked resolved before it can be closed." });
+  if (status !== undefined && !STATUSES.includes(status)) {
+    return res.status(400).json({
+      error:
+        status === "closed"
+          ? "The Closed status has been retired -- mark the ticket Resolved instead."
+          : `status must be one of: ${STATUSES.join(", ")}`,
+    });
   }
 
   // Track exactly when a ticket becomes resolved, and clear it if it's
-  // ever moved to a non-resolved, non-closed state again (a real reopen).
+  // ever moved out of resolved again (a real reopen).
   let resolvedAtUpdate; // undefined = don't touch the column
   let lastReopenedAtUpdate;
   if (status === "resolved" && currentTicket.status !== "resolved") {
@@ -196,6 +215,9 @@ router.patch("/:id", async (req, res) => {
     `UPDATE tickets SET ${sets.join(", ")} WHERE id = $${params.length} RETURNING *`,
     params
   );
+  if (status !== undefined && status !== currentTicket.status) {
+    await recordStatusEvent(currentTicket.id, currentTicket.status, status, "agent_set");
+  }
   res.json(rows[0]);
 });
 
@@ -257,9 +279,7 @@ router.post("/:id/reply", upload.single("file"), async (req, res) => {
       });
     }
 
-    if (ticket.status === "new") {
-      await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [ticket.id]);
-    }
+    await applyTransition(ticket.id, "agent_reply"); // New/Open -> Pending
 
     res.json({ ok: true });
   } catch (err) {
@@ -318,9 +338,7 @@ router.post("/:id/messages/:messageId/forward", async (req, res) => {
       });
     }
 
-    if (targetTicket.status === "new") {
-      await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [targetTicket.id]);
-    }
+    await applyTransition(targetTicket.id, "agent_reply"); // New/Open -> Pending
 
     res.json({ ok: true });
   } catch (err) {

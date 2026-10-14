@@ -1,5 +1,6 @@
 import { pool } from "../db.js";
 import { classifyTicket } from "./classifier.js";
+import { applyTransition, recordStatusEvent } from "./status.js";
 
 export function normalizePhone(raw) {
   return String(raw).replace(/\D/g, "");
@@ -28,6 +29,7 @@ export async function createTicket({ phone, name }) {
     `UPDATE tickets SET ticket_no = $1 WHERE id = $2 RETURNING *`,
     [ticketNo, ticket.id]
   );
+  await recordStatusEvent(ticket.id, null, "new", "student_message", ticket.created_at);
   return updated[0];
 }
 
@@ -169,12 +171,10 @@ export async function handleIncomingMessage({
     await pool.query(`UPDATE tickets SET previous_ticket_id = $1 WHERE id = $2`, [previousTicketId, ticket.id]);
     ticket.previous_ticket_id = previousTicketId;
     newTicketCreated = true;
-  } else if (ticket.status === "pending") {
-    // Still the same open issue, just waiting on the student -- their reply
-    // moves it back to "open", no new ticket needed.
-    await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [ticket.id]);
   }
-  // status "new" or "open": no change needed, just log the message below
+  // New / Open / Pending: the student's message is added to the same ticket
+  // and the status is left alone -- in particular a Pending ticket stays
+  // Pending, since it's still waiting on the dependency. See docs/STATUSES.md.
 
   if (!newTicketCreated && !ticket.student_name && name) {
     await pool.query(`UPDATE tickets SET student_name = $1 WHERE id = $2`, [name, ticket.id]);
@@ -247,9 +247,7 @@ export async function logAgentMessageFromPhone({
     whapiMessageId,
   });
 
-  if (ticket.status === "new") {
-    await pool.query(`UPDATE tickets SET status = 'open' WHERE id = $1`, [ticket.id]);
-  }
+  await applyTransition(ticket.id, "agent_reply");
 
   return ticket;
 }
