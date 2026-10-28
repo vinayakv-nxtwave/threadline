@@ -112,9 +112,20 @@ export function formatDuration(seconds) {
   return `${Math.round(seconds / 86400)}d`;
 }
 
+// Only ACTIVE tickets nobody has replied to yet (New Ticket / Open). A
+// Resolved ticket that never got a reply must not pin itself to the top --
+// that buried every recent chat under months-old ones.
 export function isAfterHoursWaiting(t) {
-  return !!t.tat?.afterHours && ["pending", "overdue"].includes(t.tat.responseStatus);
+  return (
+    ["new", "open"].includes(t.status) &&
+    !!t.tat?.afterHours &&
+    ["pending", "overdue"].includes(t.tat.responseStatus)
+  );
 }
+
+// TAT labels (breached / reply by / awaiting reply) only mean something while
+// the ticket is still being worked; for Resolved ones they live in TAT Reports.
+const showsTatLabels = (t) => t.status !== "resolved";
 
 // "Today 13:00" / "Tue 13:00" / "12 Oct 13:00" in IST
 export function formatDue(iso) {
@@ -460,16 +471,15 @@ export default function ThreadlineCRM() {
             .toLowerCase()
             .includes(search.toLowerCase())
     )
-    // After-hours queries still waiting on a first reply float to the top
-    // (oldest first) so they're the first thing handled next working day.
-    // Everything else keeps the server's most-recent-message order.
+    // Most recent first, always. The only exception: active after-hours
+    // queries still waiting on a first reply float above the rest (also most
+    // recent first) so they're handled first on the next working day.
     .map((t, i) => ({ t, i }))
     .sort((a, b) => {
       const pa = isAfterHoursWaiting(a.t);
       const pb = isAfterHoursWaiting(b.t);
       if (pa !== pb) return pa ? -1 : 1;
-      if (pa) return new Date(a.t.created_at) - new Date(b.t.created_at);
-      return a.i - b.i;
+      return new Date(b.t.last_message_at) - new Date(a.t.last_message_at) || a.i - b.i;
     })
     .map(({ t }) => t);
 
@@ -774,7 +784,7 @@ export default function ThreadlineCRM() {
                         {t.ticket_no}
                       </span>
                     </div>
-                    {t.tat && ["pending", "overdue"].includes(t.tat.responseStatus) && (
+                    {showsTatLabels(t) && t.tat && ["pending", "overdue"].includes(t.tat.responseStatus) && (
                       <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                         {t.tat.afterHours && (
                           <span
@@ -805,11 +815,11 @@ export default function ThreadlineCRM() {
                         <span className="text-[10px] mono" style={{ color: C.slateLight }}>
                           ⏱ {formatDuration(t.turnaroundSeconds)}
                         </span>
-                      ) : (
+                      ) : showsTatLabels(t) ? (
                         <span className="text-[10px]" style={{ color: C.coral }}>
                           awaiting reply
                         </span>
-                      )}
+                      ) : null}
                       {t.status === "pending" && t.pendingTime?.currentSince && (
                         <span className="text-[10px] mono" style={{ color: C.amber }} title="Time in Pending (working hours)">
                           ⏸ {formatWorkingMinutes(t.pendingTime.currentWorkingMinutes)}
